@@ -138,6 +138,7 @@ def production_store() -> StateStore:
     server_key_path = Path(os.getenv("AWG_CLIENTS_PUBLIC_KEY", "/etc/amnezia/clients-public.key"))
     server_key = server_key_path.read_text(encoding="utf-8").strip() if server_key_path.exists() else ""
     return StateStore(
+        exits=[{"id": "exit-01", "name": "Зарубежный VPS 01", "address": "153.76.194.217", "healthy": True}],
         registry=ClientRegistry(state_dir / "clients.sqlite3"),
         peer_manager=AwgPeerManager(),
         server_public_key=server_key,
