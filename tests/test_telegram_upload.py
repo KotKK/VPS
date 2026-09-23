@@ -45,3 +45,30 @@ def test_post_form_applies_bounded_read_timeout_to_long_poll():
     assert result == {"ok": True, "result": []}
     assert b"offset=10&timeout=50" == observed["body"]
     assert observed["timeout"]["read"] == 60.0
+
+
+def test_telegram_requests_can_share_one_persistent_client():
+    requests: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request.url.path)
+        return httpx.Response(200, json={"ok": True, "result": []})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        post_form(
+            "https://api.telegram.test/bot-token/getUpdates",
+            {"offset": "1"},
+            client=client,
+        )
+        upload_file(
+            "https://api.telegram.test/bot-token/sendDocument",
+            chat_id="123",
+            file_field="document",
+            filename="iphone.conf",
+            media_type="text/plain",
+            payload=b"profile",
+            client=client,
+        )
+        assert not client.is_closed
+
+    assert requests == ["/bot-token/getUpdates", "/bot-token/sendDocument"]

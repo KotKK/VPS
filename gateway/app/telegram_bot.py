@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 from gateway.app.profiles import qr_png
 from gateway.app.store import ClientRegistry
 from gateway.app.telegram_menu import TelegramMenu, format_exit_statuses
-from gateway.app.telegram_transport import post_form, upload_file
+from gateway.app.telegram_transport import build_client, post_form, upload_file
 
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID = str(os.environ["TELEGRAM_CHAT_ID"])
@@ -19,6 +19,7 @@ API = f"https://api.telegram.org/bot{TOKEN}"
 PANEL = "http://127.0.0.1:8080"
 registry = ClientRegistry(Path(os.getenv("AWG_GATEWAY_STATE_DIR", "/var/lib/awg-gateway")) / "clients.sqlite3")
 menus: dict[str, TelegramMenu] = {}
+telegram_client = build_client()
 DEFAULT_EXITS = [
     {"name": "Зарубежный VPS 01", "address": "153.76.194.217", "interface": "awg-uplink"}
 ]
@@ -26,7 +27,7 @@ DEFAULT_EXITS = [
 
 def api(method: str, data: dict[str, str]) -> dict:
     read_timeout = 60.0 if method == "getUpdates" else 20.0
-    return post_form(f"{API}/{method}", data, read_timeout=read_timeout)
+    return post_form(f"{API}/{method}", data, read_timeout=read_timeout, client=telegram_client)
 
 
 def keyboard(rows: list[list[str]]) -> str:
@@ -48,6 +49,7 @@ def send_file(method: str, file_field: str, filename: str, media_type: str, payl
         filename=filename,
         media_type=media_type,
         payload=payload,
+        client=telegram_client,
     )
 
 
