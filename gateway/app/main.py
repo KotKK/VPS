@@ -98,3 +98,8 @@ def create_app(store: StateStore) -> FastAPI:
         return RedirectResponse("/exits", status_code=303)
 
     return app
+
+
+# The installer currently supplies an in-memory store; a persistent backend is
+# injected by the deployment entry point as it is introduced.
+app = create_app(StateStore())

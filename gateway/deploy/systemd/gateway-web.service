@@ -1,0 +1,22 @@
+[Unit]
+Description=AmneziaWG gateway control panel (loopback only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=awg-panel
+Group=awg-panel
+WorkingDirectory=/opt/awg-gateway
+EnvironmentFile=/etc/awg-gateway/secrets.env
+ExecStart=/opt/awg-gateway/.venv/bin/uvicorn gateway.app.main:app --host 127.0.0.1 --port 8080
+Restart=on-failure
+NoNewPrivileges=yes
+ProtectSystem=strict
+PrivateTmp=yes
+IPAddressDeny=any
+IPAddressAllow=localhost
+ReadWritePaths=/var/lib/awg-gateway
+
+[Install]
+WantedBy=multi-user.target
