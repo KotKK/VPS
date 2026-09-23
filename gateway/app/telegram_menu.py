@@ -45,8 +45,23 @@ class TelegramMenu:
             self.state = "idle"
             self.selected = None
             return MenuResult("delete", client_name=name)
+        if self.state == "choose_client" and text in clients:
+            self.selected = text
+            self.state = "client_actions"
+            return MenuResult("client_actions", client_name=text)
+        if self.state == "client_actions" and self.selected:
+            if text == "Файл конфигурации":
+                return MenuResult("download_config", client_name=self.selected)
+            if text == "QR-код":
+                return MenuResult("show_qr", client_name=self.selected)
+            if text == "Назад":
+                self.state = "choose_client"
+                self.selected = None
+                return MenuResult("choose_client", choices=tuple(clients))
         if text == "Клиенты":
-            return MenuResult("list", choices=tuple(clients))
+            self.state = "choose_client"
+            self.selected = None
+            return MenuResult("choose_client", choices=tuple(clients))
         if text == "Статус":
             return MenuResult("status")
         if text == "Панель":
@@ -60,3 +75,12 @@ def format_uplink_status(output: str, now: int, max_age: int = 180) -> str:
     except (ValueError, IndexError):
         return "недоступен"
     return "доступен" if handshake > now - max_age else "недоступен"
+
+
+def format_exit_statuses(exits: list[dict[str, str]], outputs: dict[str, str], now: int) -> str:
+    """Render every configured exit with its address and live handshake state."""
+    return "\n".join(
+        f"• {node['name']} ({node['address']}): "
+        f"{format_uplink_status(outputs.get(node['interface'], ''), now)}"
+        for node in exits
+    )

@@ -1,4 +1,4 @@
-from gateway.app.telegram_menu import TelegramMenu, format_uplink_status
+from gateway.app.telegram_menu import TelegramMenu, format_exit_statuses, format_uplink_status
 
 
 def test_add_client_can_be_cancelled_without_action():
@@ -48,3 +48,45 @@ def test_button_text_ignores_telegram_variation_selector():
 def test_uplink_status_reports_fresh_handshake():
     assert format_uplink_status("peer-key\t970\n", now=1000) == "доступен"
     assert format_uplink_status("peer-key\t100\n", now=1000) == "недоступен"
+
+
+def test_client_menu_offers_configuration_and_qr_actions():
+    menu = TelegramMenu()
+    result = menu.handle("Клиенты", ["iphone"])
+    assert result.kind == "choose_client"
+    assert result.choices == ("iphone",)
+
+    result = menu.handle("iphone", ["iphone"])
+    assert result.kind == "client_actions"
+    assert result.client_name == "iphone"
+
+    result = menu.handle("Файл конфигурации", ["iphone"])
+    assert result.kind == "download_config"
+    assert result.client_name == "iphone"
+
+    result = menu.handle("QR-код", ["iphone"])
+    assert result.kind == "show_qr"
+    assert result.client_name == "iphone"
+
+    result = menu.handle("Назад", ["iphone"])
+    assert result.kind == "choose_client"
+
+
+def test_client_actions_can_be_cancelled():
+    menu = TelegramMenu()
+    menu.handle("Клиенты", ["iphone"])
+    menu.handle("iphone", ["iphone"])
+    assert menu.handle("Отмена", ["iphone"]).kind == "cancelled"
+    assert menu.state == "idle"
+
+
+def test_status_lists_each_configured_vps_with_name_ip_and_health():
+    exits = [
+        {"name": "Germany", "address": "203.0.113.10", "interface": "awg-de"},
+        {"name": "Finland", "address": "203.0.113.11", "interface": "awg-fi"},
+    ]
+    outputs = {"awg-de": "peer-a\t970\n", "awg-fi": "peer-b\t100\n"}
+    assert format_exit_statuses(exits, outputs, now=1000) == (
+        "• Germany (203.0.113.10): доступен\n"
+        "• Finland (203.0.113.11): недоступен"
+    )
