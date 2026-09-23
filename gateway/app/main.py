@@ -11,6 +11,9 @@ from fastapi.templating import Jinja2Templates
 
 from gateway.app.models import validate_name
 from gateway.app.profiles import qr_png
+from gateway.app.store import ClientRegistry
+from gateway.app.profiles import AwgParameters, build_client_profile
+from gateway.app.peers import AwgPeerManager
 
 
 @dataclass
@@ -20,6 +23,10 @@ class StateStore:
     exits: list[dict[str, Any]] = field(default_factory=list)
     clients: list[dict[str, Any]] = field(default_factory=list)
     profile_factory: Callable[[str], str] | None = None
+    registry: ClientRegistry | None = None
+    peer_manager: AwgPeerManager | None = None
+    server_public_key: str = ""
+    endpoint: str = ""
 
 
 def create_app(store: StateStore) -> FastAPI:
@@ -54,6 +61,16 @@ def create_app(store: StateStore) -> FastAPI:
             raise HTTPException(422, str(exc)) from exc
         if any(client["name"] == safe_name for client in store.clients):
             raise HTTPException(409, "client name already exists")
+        profile = store.profile_factory(safe_name) if store.profile_factory else None
+        public_key = ""
+        if store.peer_manager and store.server_public_key and store.endpoint:
+            keys = store.peer_manager.create_keys()
+            public_key = keys.public_key
+            address = f"10.20.0.{len(store.clients) + 2}/32"
+            store.peer_manager.add(keys.public_key, address)
+            profile = build_client_profile(safe_name, keys.private_key, address.replace("/32", "/24"), store.server_public_key, store.endpoint, AwgParameters(4, 8, 80, 25, 111, 234567, 345678, 456789, 567891))
+        if store.registry and profile:
+            store.registry.put(safe_name, profile, public_key)
         store.clients.append({"name": safe_name})
         return RedirectResponse("/clients", status_code=303)
 
@@ -61,7 +78,15 @@ def create_app(store: StateStore) -> FastAPI:
         if not any(client["name"] == client_name for client in store.clients):
             raise HTTPException(404, "client not found")
         if store.profile_factory is None:
+            if store.registry:
+                profile = store.registry.get(client_name)
+                if profile:
+                    return profile
             raise HTTPException(503, "AmneziaWG key generator is not configured")
+        if store.registry:
+            profile = store.registry.get(client_name)
+            if profile:
+                return profile
         return store.profile_factory(client_name)
 
     @app.get("/clients/{client_name}.conf")
@@ -78,6 +103,10 @@ def create_app(store: StateStore) -> FastAPI:
         if selected is None:
             raise HTTPException(404, "client not found")
         store.clients.remove(selected)
+        if store.registry:
+            if store.peer_manager and (public_key := store.registry.public_key(client_name)):
+                store.peer_manager.remove(public_key)
+            store.registry.delete(client_name)
         return RedirectResponse("/clients", status_code=303)
 
     @app.post("/exits/new")
