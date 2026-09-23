@@ -1,0 +1,4 @@
+{% extends "base.html" %}{% block content %}
+<h1>Clients</h1><section class="card"><h2>Add client</h2><form method="post" action="/clients/new"><label>Name<input name="name" required maxlength="64" autocomplete="off"></label><div class="actions"><button type="submit" name="action" value="create">Create profile</button><button class="secondary" type="submit" name="action" value="cancel">Cancel</button></div></form></section>
+<section class="card"><h2>Created clients</h2><ul>{% for client in clients %}<li><strong>{{ client.name }}</strong><span><a href="/clients/{{ client.name }}.conf">Config</a> <a href="/clients/{{ client.name }}/qr">QR</a></span></li>{% else %}<li class="muted">No clients yet.</li>{% endfor %}</ul></section>
+{% endblock %}
