@@ -2,13 +2,14 @@
 
 import json
 import os
+import subprocess
 import time
 from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from gateway.app.store import ClientRegistry
-from gateway.app.telegram_menu import TelegramMenu
+from gateway.app.telegram_menu import TelegramMenu, format_uplink_status
 
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID = str(os.environ["TELEGRAM_CHAT_ID"])
@@ -21,7 +22,10 @@ menus: dict[str, TelegramMenu] = {}
 def api(method: str, data: dict[str, str]) -> dict:
     request = Request(f"{API}/{method}", data=urlencode(data).encode(), method="POST")
     with urlopen(request, timeout=70) as response:
-        return json.load(response)
+        payload = json.load(response)
+    if not payload.get("ok"):
+        raise RuntimeError(str(payload.get("description", "Telegram API error")))
+    return payload
 
 
 def keyboard(rows: list[list[str]]) -> str:
@@ -42,6 +46,7 @@ def panel_post(path: str, values: dict[str, str]) -> None:
 
 
 def process(text: str) -> None:
+    print(f"telegram command: {text!r}", flush=True)
     menu = menus.setdefault(CHAT_ID, TelegramMenu())
     clients = registry.names()
     try:
@@ -60,11 +65,17 @@ def process(text: str) -> None:
             send(f"Клиент {result.client_name} удалён, его ключ отозван.", main_keyboard())
         elif result.kind == "list":
             send("Клиенты:\n" + ("\n".join(result.choices) or "нет"), main_keyboard())
+        elif result.kind == "status":
+            output = subprocess.run(["awg", "show", "awg-uplink", "latest-handshakes"], text=True, capture_output=True, check=True).stdout
+            send("Зарубежный VPS: " + format_uplink_status(output, int(time.time())), main_keyboard())
+        elif result.kind == "panel":
+            send("Панель доступна через SSH-туннель: http://127.0.0.1:8080", main_keyboard())
         elif result.kind == "cancelled":
             send("Действие отменено.", main_keyboard())
         else:
             send("Выберите действие.", main_keyboard())
     except Exception as exc:
+        print(f"telegram operation failed: {type(exc).__name__}: {exc}", flush=True)
         send(f"Операция не выполнена: {type(exc).__name__}", main_keyboard())
 
 
@@ -83,7 +94,8 @@ def run() -> None:
                 message = update.get("message", {})
                 if str(message.get("chat", {}).get("id")) == CHAT_ID and isinstance(message.get("text"), str):
                     process(message["text"])
-        except Exception:
+        except Exception as exc:
+            print(f"telegram polling failed: {type(exc).__name__}: {exc}", flush=True)
             time.sleep(5)
 
 

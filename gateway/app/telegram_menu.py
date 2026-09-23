@@ -18,6 +18,7 @@ class TelegramMenu:
         self.selected: str | None = None
 
     def handle(self, text: str, clients: list[str]) -> MenuResult:
+        text = text.replace("\ufe0f", "")
         if text == "Отмена":
             self.state = "idle"
             self.selected = None
@@ -43,4 +44,16 @@ class TelegramMenu:
             return MenuResult("delete", client_name=name)
         if text == "Клиенты":
             return MenuResult("list", choices=tuple(clients))
+        if text == "Статус":
+            return MenuResult("status")
+        if text == "Панель":
+            return MenuResult("panel")
         return MenuResult("menu")
+
+
+def format_uplink_status(output: str, now: int, max_age: int = 180) -> str:
+    try:
+        handshake = max(int(line.split()[1]) for line in output.splitlines() if line.split())
+    except (ValueError, IndexError):
+        return "недоступен"
+    return "доступен" if handshake > now - max_age else "недоступен"

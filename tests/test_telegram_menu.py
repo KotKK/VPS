@@ -1,4 +1,4 @@
-from gateway.app.telegram_menu import TelegramMenu
+from gateway.app.telegram_menu import TelegramMenu, format_uplink_status
 
 
 def test_add_client_can_be_cancelled_without_action():
@@ -24,3 +24,19 @@ def test_delete_requires_selection_and_confirmation():
     result = menu.handle("Подтвердить", ["iPhone"])
     assert result.kind == "delete"
     assert result.client_name == "iPhone"
+
+
+def test_status_and_panel_buttons_have_explicit_actions():
+    menu = TelegramMenu()
+    assert menu.handle("Статус", []).kind == "status"
+    assert menu.handle("Панель", []).kind == "panel"
+
+
+def test_button_text_ignores_telegram_variation_selector():
+    menu = TelegramMenu()
+    assert menu.handle("➕\ufe0f Добавить клиента", []).kind == "ask_name"
+
+
+def test_uplink_status_reports_fresh_handshake():
+    assert format_uplink_status("peer-key\t970\n", now=1000) == "доступен"
+    assert format_uplink_status("peer-key\t100\n", now=1000) == "недоступен"
