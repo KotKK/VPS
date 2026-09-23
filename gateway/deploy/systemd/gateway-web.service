@@ -5,8 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=awg-panel
-Group=awg-panel
+User=root
+Group=root
 WorkingDirectory=/opt/awg-gateway
 EnvironmentFile=/etc/awg-gateway/secrets.env
 ExecStart=/opt/awg-gateway/.venv/bin/uvicorn gateway.app.main:app --host 127.0.0.1 --port 8080
@@ -16,7 +16,7 @@ ProtectSystem=strict
 PrivateTmp=yes
 IPAddressDeny=any
 IPAddressAllow=localhost
-ReadWritePaths=/var/lib/awg-gateway
+ReadWritePaths=/var/lib/awg-gateway /etc/amnezia
 
 [Install]
 WantedBy=multi-user.target

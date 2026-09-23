@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import os
 from typing import Any, Callable
 
 from fastapi import FastAPI, Form, HTTPException, Request
@@ -131,4 +132,17 @@ def create_app(store: StateStore) -> FastAPI:
 
 # The installer currently supplies an in-memory store; a persistent backend is
 # injected by the deployment entry point as it is introduced.
-app = create_app(StateStore())
+def production_store() -> StateStore:
+    """Build the live store from root-owned gateway configuration."""
+    state_dir = Path(os.getenv("AWG_GATEWAY_STATE_DIR", "/var/lib/awg-gateway"))
+    server_key_path = Path(os.getenv("AWG_CLIENTS_PUBLIC_KEY", "/etc/amnezia/clients-public.key"))
+    server_key = server_key_path.read_text(encoding="utf-8").strip() if server_key_path.exists() else ""
+    return StateStore(
+        registry=ClientRegistry(state_dir / "clients.sqlite3"),
+        peer_manager=AwgPeerManager(),
+        server_public_key=server_key,
+        endpoint=os.getenv("AWG_CLIENT_ENDPOINT", "191.44.45.36:48221"),
+    )
+
+
+app = create_app(production_store())
