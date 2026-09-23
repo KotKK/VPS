@@ -78,3 +78,20 @@ def test_clients_page_has_cancellable_create_form():
     assert response.status_code == 200
     assert 'name="action" value="cancel"' in response.text
     assert "Добавить клиента" in response.text
+
+
+def test_clients_page_exposes_a_delete_action_for_each_created_client():
+    """The existing revocation endpoint must be reachable from the panel UI."""
+    client, _ = build_client()
+    client.post("/clients/new", data={"action": "create", "name": "iPhone"})
+
+    page = client.get("/clients").text
+    assert 'action="/clients/iPhone/delete"' in page
+    assert "Удалить" in page
+
+
+def test_destructive_client_action_uses_the_panel_danger_style():
+    """Revocation must not look like the primary create action."""
+    stylesheet = Path("gateway/static/app.css").read_text(encoding="utf-8")
+    assert ".danger" in stylesheet
+    assert "#ff3b30" in stylesheet
