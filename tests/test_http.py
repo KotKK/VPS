@@ -64,4 +64,4 @@ def test_clients_page_has_cancellable_create_form():
     response = client.get("/clients")
     assert response.status_code == 200
     assert 'name="action" value="cancel"' in response.text
-    assert "Add client" in response.text
+    assert "Добавить клиента" in response.text
