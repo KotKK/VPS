@@ -10,3 +10,13 @@ def test_installer_reads_telegram_secret_without_echoing_it():
     script = Path("gateway/deploy/install.sh").read_text(encoding="utf-8")
     assert "read -r -s TELEGRAM_BOT_TOKEN" in script
     assert 'echo "$TELEGRAM_BOT_TOKEN"' not in script
+
+
+def test_exit_routing_provisioner_persists_forwarding_nat_and_client_route():
+    """Every foreign exit needs the return route that fixed the live outage."""
+    script = Path("gateway/deploy/provision-exit-routing.sh").read_text(encoding="utf-8")
+    assert '[[ $(id -u) -eq 0 ]] || exit 64' in script
+    assert "net.ipv4.ip_forward = 1" in script
+    assert 'ip route replace "$CLIENT_SUBNET" dev "$EXIT_INTERFACE"' in script
+    assert 'oifname "$WAN_INTERFACE" ip saddr $CLIENT_SUBNET masquerade' in script
+    assert "ExecStartPre=-/usr/sbin/nft delete table ip awg_exit" in script
