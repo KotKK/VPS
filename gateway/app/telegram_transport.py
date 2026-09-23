@@ -1,36 +1,27 @@
-"""Encoding helpers for Telegram Bot API file uploads."""
+"""Bounded Telegram Bot API file uploads."""
 
-from uuid import uuid4
+import httpx
 
 
-def multipart_form(
-    fields: dict[str, str],
+def upload_file(
+    url: str,
     *,
+    chat_id: str,
     file_field: str,
     filename: str,
     media_type: str,
     payload: bytes,
-    boundary: str | None = None,
-) -> tuple[bytes, str]:
-    """Build one-file multipart/form-data request bytes."""
-    boundary = boundary or f"awg-gateway-{uuid4().hex}"
-    marker = boundary.encode("ascii")
-    chunks: list[bytes] = []
-    for name, value in fields.items():
-        chunks.extend(
-            [
-                b"--" + marker + b"\r\n",
-                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"),
-                value.encode("utf-8") + b"\r\n",
-            ]
+    transport: httpx.BaseTransport | None = None,
+) -> None:
+    """Upload one file and fail within bounded connect/write/read timeouts."""
+    timeout = httpx.Timeout(connect=10.0, write=10.0, read=20.0, pool=5.0)
+    with httpx.Client(timeout=timeout, transport=transport) as client:
+        response = client.post(
+            url,
+            data={"chat_id": chat_id},
+            files={file_field: (filename, payload, media_type)},
         )
-    chunks.extend(
-        [
-            b"--" + marker + b"\r\n",
-            f'Content-Disposition: form-data; name="{file_field}"; filename="{filename}"\r\n'.encode("utf-8"),
-            f"Content-Type: {media_type}\r\n\r\n".encode("ascii"),
-            payload + b"\r\n",
-            b"--" + marker + b"--\r\n",
-        ]
-    )
-    return b"".join(chunks), f"multipart/form-data; boundary={boundary}"
+    response.raise_for_status()
+    result = response.json()
+    if not result.get("ok"):
+        raise RuntimeError(str(result.get("description", "Telegram API error")))

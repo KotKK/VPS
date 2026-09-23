@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 from gateway.app.profiles import qr_png
 from gateway.app.store import ClientRegistry
 from gateway.app.telegram_menu import TelegramMenu, format_exit_statuses
-from gateway.app.telegram_transport import multipart_form
+from gateway.app.telegram_transport import upload_file
 
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID = str(os.environ["TELEGRAM_CHAT_ID"])
@@ -45,18 +45,14 @@ def send(text: str, rows: list[list[str]] | None = None) -> None:
 
 
 def send_file(method: str, file_field: str, filename: str, media_type: str, payload: bytes) -> None:
-    body, content_type = multipart_form(
-        {"chat_id": CHAT_ID},
+    upload_file(
+        f"{API}/{method}",
+        chat_id=CHAT_ID,
         file_field=file_field,
         filename=filename,
         media_type=media_type,
         payload=payload,
     )
-    request = Request(f"{API}/{method}", data=body, headers={"Content-Type": content_type}, method="POST")
-    with urlopen(request, timeout=70) as response:
-        result = json.load(response)
-    if not result.get("ok"):
-        raise RuntimeError(str(result.get("description", "Telegram API error")))
 
 
 def configured_exits() -> list[dict[str, str]]:
