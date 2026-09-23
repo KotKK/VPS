@@ -142,11 +142,12 @@ def create_app(store: StateStore) -> FastAPI:
         healthy = [node for node in store.exits if node.get("healthy")]
         if selected.get("healthy") and len(healthy) == 1 and not acknowledge:
             return HTMLResponse("acknowledge loss of final healthy exit", status_code=409)
-        if store.exit_remover:
-            try:
-                store.exit_remover(selected)
-            except Exception as exc:
-                raise HTTPException(502, "foreign VPS removal failed") from exc
+        if store.exit_remover is None:
+            raise HTTPException(503, "exit removal is not configured")
+        try:
+            store.exit_remover(selected)
+        except Exception as exc:
+            raise HTTPException(502, "foreign VPS removal failed") from exc
         store.exits.remove(selected)
         return RedirectResponse("/exits", status_code=303)
 
