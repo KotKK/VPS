@@ -10,7 +10,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse,
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from gateway.app.models import validate_name
+from gateway.app.models import ExitCreate, validate_name
 from gateway.app.profiles import qr_png
 from gateway.app.store import ClientRegistry
 from gateway.app.profiles import AwgParameters, build_client_profile
@@ -28,6 +28,7 @@ class StateStore:
     peer_manager: AwgPeerManager | None = None
     server_public_key: str = ""
     endpoint: str = ""
+    exit_provisioner: Callable[[ExitCreate], dict[str, Any]] | None = None
 
 
 def create_app(store: StateStore) -> FastAPI:
@@ -114,10 +115,23 @@ def create_app(store: StateStore) -> FastAPI:
         return RedirectResponse("/clients", status_code=303)
 
     @app.post("/exits/new")
-    def new_exit(action: str = Form(...)) -> RedirectResponse:
+    def new_exit(action: str = Form(...), name: str = Form(""), address: str = Form(""), password: str = Form("")) -> RedirectResponse:
         if action == "cancel":
             return RedirectResponse("/exits", status_code=303)
-        raise HTTPException(422, "only cancel is available until a validated form is submitted")
+        if action != "create":
+            raise HTTPException(422, "unsupported exit form action")
+        try:
+            request = ExitCreate(name=name, host=address, login="root", password=password)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        if store.exit_provisioner is None:
+            raise HTTPException(503, "exit provisioning is not configured")
+        try:
+            node = store.exit_provisioner(request)
+        except Exception as exc:
+            raise HTTPException(502, "foreign VPS provisioning failed") from exc
+        store.exits.append(node)
+        return RedirectResponse("/exits", status_code=303)
 
     @app.post("/exits/{exit_id}/delete", response_class=HTMLResponse)
     def delete_exit(exit_id: str, acknowledge: bool = Form(False)) -> Response:

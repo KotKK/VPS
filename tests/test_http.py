@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 from pathlib import Path
 
 from gateway.app.main import StateStore, create_app
+from gateway.app.models import ExitCreate
 from gateway.app.store import ClientRegistry
 
 
@@ -12,6 +13,17 @@ def profile_factory(name: str) -> str:
 def build_client() -> tuple[TestClient, StateStore]:
     store = StateStore(profile_factory=profile_factory)
     return TestClient(create_app(store)), store
+
+
+def test_create_exit_calls_provisioner_before_it_appears_in_panel():
+    """An exit is listed only after its SSH provisioning succeeds."""
+    calls: list[ExitCreate] = []
+    store = StateStore(exit_provisioner=lambda request: calls.append(request) or {"id": "exit-de", "name": request.name, "address": str(request.host), "healthy": True})
+    client = TestClient(create_app(store))
+    response = client.post("/exits/new", data={"action": "create", "name": "Germany", "address": "203.0.113.2", "password": "secret"}, follow_redirects=False)
+    assert response.status_code == 303
+    assert calls[0].login == "root"
+    assert store.exits[0]["id"] == "exit-de"
 
 
 def test_cancelled_exit_form_does_not_persist_an_exit():
