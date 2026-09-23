@@ -13,3 +13,8 @@ def test_validate_name_rejects_configuration_injection():
     """A newline in a display name must not become a generated config field."""
     with pytest.raises(ValueError):
         validate_name("phone\nPrivateKey = injected")
+
+
+def test_validate_name_accepts_russian_client_name():
+    """A Russian UI must allow an operator to name a client in Russian."""
+    assert validate_name("Айфон Мамы") == "Айфон Мамы"

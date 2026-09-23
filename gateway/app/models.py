@@ -1,17 +1,15 @@
 """Validated records accepted from the gateway control plane."""
 
-import re
 from ipaddress import IPv4Address
 from typing import Literal
 
 from pydantic import BaseModel, SecretStr, ValidationError, field_validator
 
-_SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.-]{0,62}$")
-
-
 def validate_name(value: str) -> str:
     """Return a safe display identifier suitable for generated configuration."""
-    if not _SAFE_NAME.fullmatch(value):
+    if not 1 <= len(value) <= 63 or not value[0].isalnum() or any(
+        not (character.isalnum() or character in " _.-") for character in value
+    ):
         raise ValueError("name must be 1–63 safe characters")
     return value
 

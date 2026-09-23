@@ -30,7 +30,10 @@ class TelegramMenu:
             self.state = "choose_delete"
             return MenuResult("choose_delete", choices=tuple(clients))
         if self.state == "await_name":
-            name = validate_name(text)
+            try:
+                name = validate_name(text)
+            except ValueError:
+                return MenuResult("invalid_name")
             self.state = "idle"
             return MenuResult("create", client_name=name)
         if self.state == "choose_delete" and text in clients:

@@ -17,6 +17,14 @@ def test_add_client_emits_create_only_after_name():
     assert result.client_name == "iPad"
 
 
+def test_invalid_client_name_returns_validation_result_instead_of_crashing():
+    menu = TelegramMenu()
+    menu.handle("➕ Добавить клиента", [])
+    result = menu.handle("../phone", [])
+    assert result.kind == "invalid_name"
+    assert menu.state == "await_name"
+
+
 def test_delete_requires_selection_and_confirmation():
     menu = TelegramMenu()
     assert menu.handle("➖ Удалить клиента", ["iPhone"]).kind == "choose_delete"

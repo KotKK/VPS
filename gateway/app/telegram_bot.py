@@ -53,6 +53,8 @@ def process(text: str) -> None:
         result = menu.handle(text, clients)
         if result.kind == "ask_name":
             send("Введите имя нового клиента.", [["Отмена"]])
+        elif result.kind == "invalid_name":
+            send("Имя: от 1 до 63 символов. Можно использовать русские и латинские буквы, цифры, пробел, '.', '_' и '-'.", [["Отмена"]])
         elif result.kind == "choose_delete":
             send("Выберите клиента.", [[name] for name in result.choices] + [["Отмена"]])
         elif result.kind == "confirm_delete":
