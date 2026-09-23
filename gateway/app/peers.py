@@ -14,6 +14,10 @@ class AwgPeerManager:
         result = subprocess.run(args, input=input_text, text=True, capture_output=True, check=True)
         return result.stdout
 
+    def run(self, args: list[str], input_text: str | None = None) -> str:
+        """Protocol method consumed by AwgKeyGenerator."""
+        return self._run(args, input_text)
+
     def create_keys(self):
         return AwgKeyGenerator(self).generate()
 
