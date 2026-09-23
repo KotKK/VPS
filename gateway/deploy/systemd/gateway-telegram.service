@@ -1,0 +1,17 @@
+[Unit]
+Description=AmneziaWG Telegram management menu
+After=network-online.target gateway-web.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/awg-gateway
+EnvironmentFile=/etc/awg-gateway/secrets.env
+ExecStart=/opt/awg-gateway/.venv/bin/python -m gateway.app.telegram_bot
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target
