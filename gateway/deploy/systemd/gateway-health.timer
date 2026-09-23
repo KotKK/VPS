@@ -1,0 +1,9 @@
+[Unit]
+Description=Run AmneziaWG foreign exit health check
+
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=60
+
+[Install]
+WantedBy=timers.target

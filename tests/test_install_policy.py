@@ -20,3 +20,13 @@ def test_exit_routing_provisioner_persists_forwarding_nat_and_client_route():
     assert 'ip route replace "$CLIENT_SUBNET" dev "$EXIT_INTERFACE"' in script
     assert 'oifname "$WAN_INTERFACE" ip saddr $CLIENT_SUBNET masquerade' in script
     assert "ExecStartPre=-/usr/sbin/nft delete table ip awg_exit" in script
+
+
+def test_health_timer_runs_monitor_without_exposing_telegram_secrets():
+    script = Path("gateway/deploy/health-check.sh").read_text(encoding="utf-8")
+    unit = Path("gateway/deploy/systemd/gateway-health.service").read_text(encoding="utf-8")
+    timer = Path("gateway/deploy/systemd/gateway-health.timer").read_text(encoding="utf-8")
+    assert "awg show awg-uplink latest-handshakes" in script
+    assert "TELEGRAM_BOT_TOKEN" in script
+    assert "ExecStart=/opt/awg-gateway/gateway/deploy/health-check.sh" in unit
+    assert "OnUnitActiveSec=60" in timer

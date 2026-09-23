@@ -1,0 +1,6 @@
+[Unit]
+Description=AmneziaWG foreign exit health check
+
+[Service]
+Type=oneshot
+ExecStart=/opt/awg-gateway/gateway/deploy/health-check.sh
