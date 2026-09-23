@@ -28,6 +28,12 @@ class ClientRegistry:
             row = conn.execute("SELECT profile FROM clients WHERE name = ?", (name,)).fetchone()
         return None if row is None else str(row[0])
 
+    def names(self) -> list[str]:
+        """Return issued profile names in deterministic display order."""
+        with self._connect() as conn:
+            rows = conn.execute("SELECT name FROM clients ORDER BY name").fetchall()
+        return [str(row[0]) for row in rows]
+
     def delete(self, name: str) -> bool:
         with self._connect() as conn:
             return conn.execute("DELETE FROM clients WHERE name = ?", (name,)).rowcount == 1

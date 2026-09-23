@@ -1,6 +1,8 @@
 from fastapi.testclient import TestClient
+from pathlib import Path
 
 from gateway.app.main import StateStore, create_app
+from gateway.app.store import ClientRegistry
 
 
 def profile_factory(name: str) -> str:
@@ -56,6 +58,17 @@ def test_created_client_has_qr_download_and_can_be_deleted():
     assert client.get("/clients/iPhone/qr").content.startswith(b"\x89PNG")
     assert client.post("/clients/iPhone/delete", follow_redirects=False).status_code == 303
     assert store.clients == []
+
+
+def test_persisted_client_is_listed_and_its_profile_survives_a_panel_restart(tmp_path: Path):
+    """Restarting the web service must not hide or orphan an issued profile."""
+    registry = ClientRegistry(tmp_path / "clients.sqlite3")
+    registry.put("iPhone", "[Interface]\nPrivateKey = saved\n", "public-key")
+    restarted_store = StateStore(registry=registry)
+    app = TestClient(create_app(restarted_store))
+
+    assert "iPhone" in app.get("/clients").text
+    assert app.get("/clients/iPhone.conf").text == "[Interface]\nPrivateKey = saved\n"
 
 
 def test_clients_page_has_cancellable_create_form():

@@ -32,6 +32,9 @@ class StateStore:
 
 def create_app(store: StateStore) -> FastAPI:
     """Create the UI; deployment binds Uvicorn to 127.0.0.1 only."""
+    if store.registry:
+        known_names = {client["name"] for client in store.clients}
+        store.clients.extend({"name": name} for name in store.registry.names() if name not in known_names)
     app = FastAPI(docs_url=None, redoc_url=None)
     asset_root = Path(__file__).resolve().parents[1]
     templates = Jinja2Templates(directory=str(asset_root / "templates"))
