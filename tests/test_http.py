@@ -86,6 +86,8 @@ def test_clients_page_exposes_a_delete_action_for_each_created_client():
     client.post("/clients/new", data={"action": "create", "name": "iPhone"})
 
     page = client.get("/clients").text
+    assert 'class="action-link" href="/clients/iPhone.conf"' in page
+    assert 'class="action-link" href="/clients/iPhone/qr"' in page
     assert 'action="/clients/iPhone/delete"' in page
     assert "Удалить" in page
 
@@ -95,3 +97,11 @@ def test_destructive_client_action_uses_the_panel_danger_style():
     stylesheet = Path("gateway/static/app.css").read_text(encoding="utf-8")
     assert ".danger" in stylesheet
     assert "#ff3b30" in stylesheet
+
+
+def test_panel_styles_define_the_dark_appearance_tokens():
+    """The dark interface needs explicit background, card and text contrast."""
+    stylesheet = Path("gateway/static/app.css").read_text(encoding="utf-8")
+    assert "background:#000" in stylesheet
+    assert "#1c1c1e" in stylesheet
+    assert "#f5f5f7" in stylesheet
