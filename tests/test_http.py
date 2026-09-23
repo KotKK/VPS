@@ -43,6 +43,24 @@ def test_deleting_the_final_healthy_exit_requires_acknowledgement():
     assert "acknowledge" in response.text
 
 
+def test_deleting_an_exit_calls_network_remover_before_removing_it_from_panel():
+    removed: list[str] = []
+    store = StateStore(exit_remover=lambda node: removed.append(node["id"]))
+    store.exits.append({"id": "exit-a", "name": "Germany", "healthy": False})
+    response = TestClient(create_app(store)).post("/exits/exit-a/delete", follow_redirects=False)
+    assert response.status_code == 303
+    assert removed == ["exit-a"]
+    assert store.exits == []
+
+
+def test_exits_page_exposes_a_confirmed_delete_button():
+    client, store = build_client()
+    store.exits.append({"id": "exit-a", "name": "Germany", "address": "203.0.113.2", "healthy": False})
+    page = client.get("/exits").text
+    assert 'action="/exits/exit-a/delete"' in page
+    assert "Удалить VPS" in page
+
+
 def test_cancelled_client_form_does_not_persist_a_client():
     """Canceling client creation must not consume an address or issue a profile."""
     client, store = build_client()
