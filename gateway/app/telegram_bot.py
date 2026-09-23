@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 from gateway.app.profiles import qr_png
 from gateway.app.store import ClientRegistry
 from gateway.app.telegram_menu import TelegramMenu, format_exit_statuses
-from gateway.app.telegram_transport import upload_file
+from gateway.app.telegram_transport import post_form, upload_file
 
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID = str(os.environ["TELEGRAM_CHAT_ID"])
@@ -25,12 +25,8 @@ DEFAULT_EXITS = [
 
 
 def api(method: str, data: dict[str, str]) -> dict:
-    request = Request(f"{API}/{method}", data=urlencode(data).encode(), method="POST")
-    with urlopen(request, timeout=70) as response:
-        payload = json.load(response)
-    if not payload.get("ok"):
-        raise RuntimeError(str(payload.get("description", "Telegram API error")))
-    return payload
+    read_timeout = 60.0 if method == "getUpdates" else 20.0
+    return post_form(f"{API}/{method}", data, read_timeout=read_timeout)
 
 
 def keyboard(rows: list[list[str]]) -> str:
