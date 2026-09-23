@@ -1,3 +1,3 @@
 {% extends "base.html" %}{% block content %}
-<section class="hero"><p class="eyebrow">PRIVATE GATEWAY</p><h1>Amnezia Gateway</h1><p>{{ client_count }} clients · {{ healthy }}/{{ exit_count }} healthy exits</p></section>
+<header><p class="eyebrow">OVERVIEW</p><h1>Gateway</h1><p>Securely route your devices through your private network.</p></header><section class="stats"><div><b>{{ client_count }}</b><span>Clients</span></div><div><b>{{ healthy }}</b><span>Online exits</span></div><div><b>{{ exit_count }}</b><span>Total exits</span></div></section><section class="card status"><span class="dot"></span><div><strong>Network is ready</strong><p>Your control panel is available only through the SSH tunnel.</p></div></section>
 {% endblock %}
