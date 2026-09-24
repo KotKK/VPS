@@ -152,6 +152,20 @@ def test_existing_live_uplink_is_seeded_once_without_reallocation(tmp_path):
     assert first.status is ExitStatus.READY
 
 
+def test_legacy_live_uplink_config_is_migrated(tmp_path):
+    repository = ExitRepository(tmp_path / "exits.sqlite3")
+    current_config = tmp_path / "awg-uplink.conf"
+    legacy_config = tmp_path / "russia-exit.conf"
+    legacy_config.write_text("live", encoding="utf-8")
+
+    record = seed_existing_exit(repository, current_config, legacy_config)
+
+    assert record is not None
+    assert record.slot == 1
+    assert record.interface == "awg-uplink"
+    assert record.status is ExitStatus.READY
+
+
 def test_job_backed_final_ready_exit_requires_russian_acknowledgement(tmp_path):
     repository = ExitRepository(tmp_path / "exits.sqlite3")
     record = repository.create("de", IPv4Address("203.0.113.2"))

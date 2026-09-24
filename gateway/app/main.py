@@ -81,11 +81,12 @@ def _record_view(record: ExitRecord) -> dict[str, Any]:
 def seed_existing_exit(
     repository: ExitRepository,
     existing_config: Path = Path("/etc/amnezia/awg-uplink.conf"),
+    legacy_config: Path = Path("/etc/amnezia/russia-exit.conf"),
 ) -> ExitRecord | None:
     existing = repository.list()
     if existing:
         return existing[0]
-    if not existing_config.exists():
+    if not existing_config.exists() and not legacy_config.exists():
         return None
     record = repository.create(
         "Зарубежный VPS 01", IPv4Address("153.76.194.217")
