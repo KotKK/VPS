@@ -1,3 +1,46 @@
-{% extends "base.html" %}{% block content %}
-<h1>Выходные VPS</h1><section class="card"><h2>Добавить выходной VPS</h2><form method="post" action="/exits/new"><label>Название<input name="name" required maxlength="64"></label><label>IP-адрес<input name="address" required inputmode="decimal"></label><label>Логин<input value="root" readonly></label><label>Пароль<input name="password" type="password" autocomplete="new-password"></label><div class="actions"><button type="submit" name="action" value="create">Добавить VPS</button><button class="secondary" type="submit" name="action" value="cancel">Отмена</button></div></form></section><section class="card"><h2>Подключённые VPS</h2><ul>{% for node in exits %}<li><strong>{{ node.name }}</strong><span class="client-actions">{{ node.get('address', 'ожидание') }}<form class="inline-form" method="post" action="/exits/{{ node.id }}/delete" onsubmit="return confirm('Удалить VPS из балансировки?');"><button class="danger" type="submit">Удалить VPS</button></form></span></li>{% else %}<li class="muted">Выходные VPS пока не добавлены.</li>{% endfor %}</ul></section>
+{% extends "base.html" %}
+{% block head_extra %}{% if refreshing %}<meta http-equiv="refresh" content="3">{% endif %}{% endblock %}
+{% block content %}
+<h1>Выходные VPS</h1>
+<section class="card">
+  <h2>Добавить выходной VPS</h2>
+  <form method="post" action="/exits/new">
+    <label>Название<input name="name" required maxlength="63" autocomplete="off"></label>
+    <label>IP-адрес<input name="address" required inputmode="decimal" autocomplete="off"></label>
+    <label>Логин<input value="root" readonly></label>
+    <label>Пароль<input name="password" type="password" required autocomplete="new-password"></label>
+    <div class="actions">
+      <button type="submit" name="action" value="create">Добавить VPS</button>
+      <button class="secondary" type="submit" name="action" value="cancel">Отмена</button>
+    </div>
+  </form>
+</section>
+<section class="card">
+  <h2>Подключённые VPS</h2>
+  <ul class="exit-list">
+    {% for node in exits %}
+    <li>
+      <div class="exit-copy">
+        <strong>{{ node.name }}</strong>
+        <span class="muted">{{ node.address }}</span>
+        <span class="stage">{{ node.stage_label }}</span>
+        {% if node.error %}<span class="error-text">{{ node.error }}</span>{% endif %}
+        {% if node.warning %}<span class="warning-text">{{ node.warning }}</span>{% endif %}
+      </div>
+      <span class="client-actions">
+        <span class="badge badge-{{ node.status }}">{{ node.status_label }}</span>
+        {% if node.status == "installing" %}
+        <form class="inline-form" method="post" action="/exits/{{ node.id }}/cancel">
+          <button class="secondary" type="submit">Остановить установку</button>
+        </form>
+        {% else %}
+        <form class="inline-form" method="post" action="/exits/{{ node.id }}/delete" onsubmit="return confirm('Удалить VPS из балансировки?');">
+          <button class="danger" type="submit">Удалить VPS</button>
+        </form>
+        {% endif %}
+      </span>
+    </li>
+    {% else %}<li class="muted">Выходные VPS пока не добавлены.</li>{% endfor %}
+  </ul>
+</section>
 {% endblock %}

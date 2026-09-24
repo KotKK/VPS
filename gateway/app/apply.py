@@ -1,7 +1,9 @@
 """Small, testable transaction boundary for privileged state activation."""
 
 from dataclasses import dataclass
+import os
 from pathlib import Path, PurePosixPath
+import subprocess
 from typing import Protocol
 
 from gateway.app.renderer import GatewayState, render_egress_nft, render_policy_routes
@@ -33,6 +35,18 @@ class EgressCommandRunner(Protocol):
     def write_atomic(self, path: Path, content: str) -> None: ...
 
     def run(self, args: list[str]) -> bool: ...
+
+
+class SubprocessEgressRunner:
+    def write_atomic(self, path: Path | PurePosixPath, content: str) -> None:
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_name(f".{target.name}.tmp")
+        temporary.write_text(content, encoding="utf-8", newline="\n")
+        os.replace(temporary, target)
+
+    def run(self, args: list[str]) -> bool:
+        return subprocess.run(args, capture_output=True, text=True).returncode == 0
 
 
 @dataclass

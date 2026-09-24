@@ -2,6 +2,8 @@ from fastapi.testclient import TestClient
 from pathlib import Path
 
 from gateway.app.main import StateStore, create_app
+from gateway.app.main import seed_existing_exit
+from gateway.app.exit_store import ExitRepository, ExitStatus
 from gateway.app.models import ExitCreate
 from gateway.app.store import ClientRegistry
 
@@ -13,6 +15,27 @@ def profile_factory(name: str) -> str:
 def build_client() -> tuple[TestClient, StateStore]:
     store = StateStore(profile_factory=profile_factory)
     return TestClient(create_app(store)), store
+
+
+class FakeExitJobs:
+    def __init__(self, repository: ExitRepository):
+        self.repository = repository
+        self.started = []
+        self.cancelled = []
+
+    def start(self, request):
+        self.started.append(request)
+        record = self.repository.create(request.name, request.host)
+        return self.repository.set_stage(
+            record.id, ExitStatus.INSTALLING, "ssh"
+        )
+
+    def cancel(self, exit_id):
+        self.cancelled.append(exit_id)
+        self.repository.request_cancel(exit_id)
+
+    def shutdown(self):
+        pass
 
 
 def test_create_exit_calls_provisioner_before_it_appears_in_panel():
@@ -59,6 +82,63 @@ def test_exits_page_exposes_a_confirmed_delete_button():
     page = client.get("/exits").text
     assert 'action="/exits/exit-a/delete"' in page
     assert "Удалить VPS" in page
+
+
+def test_create_exit_redirects_immediately_and_shows_installing_stage(tmp_path):
+    jobs = FakeExitJobs(ExitRepository(tmp_path / "exits.sqlite3"))
+    client = TestClient(create_app(StateStore(), exit_jobs=jobs))
+
+    response = client.post(
+        "/exits/new",
+        data={
+            "action": "create",
+            "name": "Германия",
+            "address": "203.0.113.2",
+            "password": "secret",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/exits"
+    assert jobs.started[0].login == "root"
+    page = client.get("/exits").text
+    assert "Установка" in page
+    assert "Подключение по SSH" in page
+    assert 'http-equiv="refresh" content="3"' in page
+
+
+def test_exit_password_never_returns_in_html(tmp_path):
+    secret = "visible-only-once"
+    jobs = FakeExitJobs(ExitRepository(tmp_path / "exits.sqlite3"))
+    client = TestClient(create_app(StateStore(), exit_jobs=jobs))
+
+    client.post(
+        "/exits/new",
+        data={
+            "action": "create",
+            "name": "de",
+            "address": "203.0.113.2",
+            "password": secret,
+        },
+    )
+
+    assert secret not in client.get("/exits").text
+
+
+def test_existing_live_uplink_is_seeded_once_without_reallocation(tmp_path):
+    repository = ExitRepository(tmp_path / "exits.sqlite3")
+    config = tmp_path / "awg-uplink.conf"
+    config.write_text("live", encoding="utf-8")
+
+    first = seed_existing_exit(repository, config)
+    second = seed_existing_exit(repository, config)
+
+    assert first is not None
+    assert first.id == second.id
+    assert first.slot == 1
+    assert first.interface == "awg-uplink"
+    assert first.status is ExitStatus.READY
 
 
 def test_cancelled_client_form_does_not_persist_a_client():

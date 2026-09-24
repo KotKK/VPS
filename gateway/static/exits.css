@@ -1,0 +1,45 @@
+.exit-copy {
+  display: grid;
+  gap: 5px;
+}
+
+.stage {
+  color: #d1d1d6;
+  font-size: 13px;
+}
+
+.badge {
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.badge-installing,
+.badge-deleting {
+  background: #ff9f0a22;
+  color: #ff9f0a;
+}
+
+.badge-ready {
+  background: #30d15822;
+  color: #30d158;
+}
+
+.badge-error,
+.error-text {
+  color: #ff6961;
+}
+
+.badge-error {
+  background: #ff453a22;
+}
+
+.error-text,
+.warning-text {
+  font-size: 13px;
+}
+
+.warning-text {
+  color: #ffd60a;
+}
