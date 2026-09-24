@@ -255,10 +255,15 @@ class ExitRepository:
                 """
                 UPDATE exits
                 SET status = ?, stage = 'interrupted',
-                    error = 'Установка прервана перезапуском панели', updated_at = ?
-                WHERE status = ?
+                    error = 'Операция прервана перезапуском панели', updated_at = ?
+                WHERE status IN (?, ?)
                 """,
-                (ExitStatus.ERROR.value, now, ExitStatus.INSTALLING.value),
+                (
+                    ExitStatus.ERROR.value,
+                    now,
+                    ExitStatus.INSTALLING.value,
+                    ExitStatus.DELETING.value,
+                ),
             )
         return cursor.rowcount
 

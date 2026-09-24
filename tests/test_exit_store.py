@@ -40,6 +40,20 @@ def test_schema_never_contains_password_column(tmp_path):
     assert "password" not in {column[1] for column in columns}
 
 
+def test_restart_recovers_interrupted_deletion(tmp_path):
+    repository = ExitRepository(tmp_path / "exits.sqlite3")
+    record = repository.create("Germany", IPv4Address("203.0.113.10"))
+    repository.set_stage(record.id, ExitStatus.DELETING, "remove_balance")
+
+    assert repository.recover_interrupted() == 1
+
+    recovered = repository.get(record.id)
+    assert recovered is not None
+    assert recovered.status is ExitStatus.ERROR
+    assert recovered.stage == "interrupted"
+    assert "перезапуском" in recovered.error
+
+
 def test_restart_marks_installing_record_as_error(tmp_path):
     """A crashed installation must never become a routable exit after restart."""
     repo = ExitRepository(tmp_path / "state.sqlite3")
