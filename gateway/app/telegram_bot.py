@@ -16,13 +16,14 @@ CHAT_ID = str(os.environ["TELEGRAM_CHAT_ID"])
 API = f"https://api.telegram.org/bot{TOKEN}"
 PANEL = "http://127.0.0.1:8080"
 POLL_TIMEOUT_SECONDS = 3
+API_HTTP_TIMEOUT_SECONDS = 8
 registry = ClientRegistry(Path(os.getenv("AWG_GATEWAY_STATE_DIR", "/var/lib/awg-gateway")) / "clients.sqlite3")
 menus: dict[str, TelegramMenu] = {}
 
 
 def api(method: str, data: dict[str, str]) -> dict:
     request = Request(f"{API}/{method}", data=urlencode(data).encode(), method="POST")
-    with urlopen(request, timeout=70) as response:
+    with urlopen(request, timeout=API_HTTP_TIMEOUT_SECONDS) as response:
         payload = json.load(response)
     if not payload.get("ok"):
         raise RuntimeError(str(payload.get("description", "Telegram API error")))
