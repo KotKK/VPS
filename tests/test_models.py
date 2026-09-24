@@ -18,3 +18,8 @@ def test_validate_name_rejects_configuration_injection():
 def test_validate_name_accepts_russian_client_name():
     """A Russian UI must allow an operator to name a client in Russian."""
     assert validate_name("Айфон Мамы") == "Айфон Мамы"
+
+
+def test_validate_name_accepts_city_in_parentheses():
+    """A human-readable VPS label may contain a provider and Russian city."""
+    assert validate_name("Aeza (Стокгольм)") == "Aeza (Стокгольм)"

@@ -2,6 +2,7 @@
 {% block head_extra %}{% if refreshing %}<meta http-equiv="refresh" content="3">{% endif %}{% endblock %}
 {% block content %}
 <h1>Выходные VPS</h1>
+{% if form_error %}<p class="error-text">{{ form_error }}</p>{% endif %}
 <section class="card">
   <h2>Добавить выходной VPS</h2>
   <form method="post" action="/exits/new">

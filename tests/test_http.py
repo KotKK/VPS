@@ -60,6 +60,27 @@ def test_create_exit_calls_provisioner_before_it_appears_in_panel():
     assert store.exits[0]["id"] == "exit-de"
 
 
+def test_invalid_exit_form_returns_to_panel_with_friendly_error():
+    client, _store = build_client()
+
+    response = client.post(
+        "/exits/new",
+        data={
+            "action": "create",
+            "name": "bad/name",
+            "address": "203.0.113.2",
+            "password": "secret",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("/exits?error=")
+    page = client.get(response.headers["location"])
+    assert page.status_code == 200
+    assert "Проверьте название, IP-адрес и пароль" in page.text
+
+
 def test_cancelled_exit_form_does_not_persist_an_exit():
     """Cancel must discard a draft rather than make a network change."""
     client, store = build_client()

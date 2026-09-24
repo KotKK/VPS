@@ -8,7 +8,7 @@ from pydantic import BaseModel, SecretStr, ValidationError, field_validator
 def validate_name(value: str) -> str:
     """Return a safe display identifier suitable for generated configuration."""
     if not 1 <= len(value) <= 63 or not value[0].isalnum() or any(
-        not (character.isalnum() or character in " _.-") for character in value
+        not (character.isalnum() or character in " _.-()") for character in value
     ):
         raise ValueError("name must be 1–63 safe characters")
     return value

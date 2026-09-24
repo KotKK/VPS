@@ -6,6 +6,7 @@ from ipaddress import IPv4Address
 from pathlib import Path
 import os
 from typing import Any, Callable
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
@@ -132,7 +133,7 @@ def create_app(
         return templates.TemplateResponse(request, "dashboard.html", {"client_count": len(store.clients), "healthy": healthy, "exit_count": len(exits_now)})
 
     @app.get("/exits", response_class=HTMLResponse)
-    def exits(request: Request) -> HTMLResponse:
+    def exits(request: Request, error: str = "") -> HTMLResponse:
         jobs = jobs_holder["jobs"]
         if jobs is None:
             exit_rows = [
@@ -159,6 +160,7 @@ def create_app(
                 "refreshing": any(
                     row["status"] in {"installing", "deleting"} for row in exit_rows
                 ),
+                "form_error": error,
             },
         )
 
@@ -234,8 +236,12 @@ def create_app(
             raise HTTPException(422, "unsupported exit form action")
         try:
             request = ExitCreate(name=name, host=address, login="root", password=password)
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
+        except ValueError:
+            message = "Проверьте название, IP-адрес и пароль."
+            return RedirectResponse(
+                f"/exits?{urlencode({'error': message})}",
+                status_code=303,
+            )
         jobs = jobs_holder["jobs"]
         if jobs is not None:
             try:
