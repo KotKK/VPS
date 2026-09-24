@@ -1,7 +1,10 @@
 """Small, testable transaction boundary for privileged state activation."""
 
 from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
 from typing import Protocol
+
+from gateway.app.renderer import GatewayState, render_egress_nft, render_policy_routes
 
 
 class CommandRunner(Protocol):
@@ -10,8 +13,9 @@ class CommandRunner(Protocol):
 
 @dataclass(frozen=True)
 class ApplyResult:
-    active_generation: str
-    rolled_back: bool
+    active_generation: str = ""
+    rolled_back: bool = False
+    active: GatewayState | None = None
 
 
 def apply_state(staged: str, previous: str, runner: CommandRunner) -> ApplyResult:
@@ -23,3 +27,62 @@ def apply_state(staged: str, previous: str, runner: CommandRunner) -> ApplyResul
     runner.run(f"restore {previous}")
     runner.run(f"activate {previous}")
     return ApplyResult(active_generation=previous, rolled_back=True)
+
+
+class EgressCommandRunner(Protocol):
+    def write_atomic(self, path: Path, content: str) -> None: ...
+
+    def run(self, args: list[str]) -> bool: ...
+
+
+@dataclass
+class EgressApplier:
+    """Validate and activate one complete egress-routing generation."""
+
+    runner: EgressCommandRunner
+    runtime_dir: PurePosixPath = PurePosixPath("/run/awg-gateway")
+
+    def _write(self, name: str, state: GatewayState) -> PurePosixPath:
+        path = self.runtime_dir / name
+        self.runner.write_atomic(path, render_egress_nft(state))
+        return path
+
+    def _install_routes(self, state: GatewayState) -> bool:
+        return all(self.runner.run(command) for command in render_policy_routes(state))
+
+    def _restore(self, previous: GatewayState) -> None:
+        previous_path = self._write("previous.nft", previous)
+        self._install_routes(previous)
+        self.runner.run(["nft", "-f", str(previous_path)])
+
+    def apply(self, previous: GatewayState, desired: GatewayState) -> ApplyResult:
+        next_path = self._write("next.nft", desired)
+        if not self.runner.run(["nft", "-c", "-f", str(next_path)]):
+            return ApplyResult(active=previous)
+
+        if not self._install_routes(desired):
+            self._restore(previous)
+            return ApplyResult(active=previous, rolled_back=True)
+
+        if not self.runner.run(["nft", "-f", str(next_path)]):
+            self._restore(previous)
+            return ApplyResult(active=previous, rolled_back=True)
+
+        desired_tables = {route.route_table for route in desired.exits}
+        for stale in previous.exits:
+            if stale.route_table in desired_tables:
+                continue
+            self.runner.run(
+                [
+                    "ip",
+                    "rule",
+                    "del",
+                    "fwmark",
+                    hex(stale.mark),
+                    "lookup",
+                    str(stale.route_table),
+                ]
+            )
+            self.runner.run(["ip", "route", "flush", "table", str(stale.route_table)])
+
+        return ApplyResult(active=desired)
