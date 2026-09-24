@@ -197,6 +197,29 @@ class ExitRepository:
             if cursor.rowcount != 1:
                 raise KeyError(exit_id)
 
+    def prepare_retry(self, exit_id: str) -> ExitRecord:
+        now = datetime.now(UTC).isoformat()
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE exits
+                SET status = ?, stage = 'queued', error = '', warning = '',
+                    cancel_requested = 0, updated_at = ?
+                WHERE id = ? AND status = ?
+                """,
+                (
+                    ExitStatus.INSTALLING.value,
+                    now,
+                    exit_id,
+                    ExitStatus.ERROR.value,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("Повтор возможен только для VPS с ошибкой")
+        record = self.get(exit_id)
+        assert record is not None
+        return record
+
     def cancel_requested(self, exit_id: str) -> bool:
         with self._connect() as connection:
             row = connection.execute(

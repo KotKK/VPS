@@ -141,6 +141,9 @@ class ExitProvisioner:
             return "Удалённая очистка не завершена"
         return None
 
+    def cleanup_local(self, record: ExitRecord) -> None:
+        self.local_manager.remove(record)
+
 
 __all__ = [
     "ExitProvisioner",
