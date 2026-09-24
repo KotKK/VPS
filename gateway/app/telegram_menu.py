@@ -1,7 +1,10 @@
 """Small state machine for the Telegram client-management menu."""
 
 from dataclasses import dataclass
+import subprocess
+from typing import Callable, Sequence
 
+from gateway.app.exit_store import ExitRecord, ExitStatus
 from gateway.app.models import validate_name
 
 
@@ -60,3 +63,33 @@ def format_uplink_status(output: str, now: int, max_age: int = 180) -> str:
     except (ValueError, IndexError):
         return "недоступен"
     return "доступен" if handshake > now - max_age else "недоступен"
+
+
+def format_exit_statuses(
+    exits: Sequence[ExitRecord],
+    handshake_reader: Callable[[str], str],
+    now: int,
+) -> str:
+    """Render every persisted exit and verify ready ones against live handshakes."""
+    if not exits:
+        return "Зарубежные VPS:\nнет"
+
+    lines = ["Зарубежные VPS:"]
+    for exit_node in exits:
+        if exit_node.status is ExitStatus.READY:
+            try:
+                state = format_uplink_status(
+                    handshake_reader(exit_node.interface),
+                    now,
+                )
+            except (OSError, subprocess.SubprocessError):
+                state = "недоступен"
+        elif exit_node.status is ExitStatus.INSTALLING:
+            state = f"устанавливается ({exit_node.stage})"
+        elif exit_node.status is ExitStatus.DELETING:
+            state = "удаляется"
+        else:
+            detail = exit_node.error or exit_node.warning or exit_node.stage
+            state = f"ошибка: {detail}"
+        lines.append(f"• {exit_node.name} ({exit_node.address}) — {state}")
+    return "\n".join(lines)

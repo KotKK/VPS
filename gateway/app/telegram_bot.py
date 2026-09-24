@@ -8,8 +8,9 @@ from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from gateway.app.exit_store import ExitRepository
 from gateway.app.store import ClientRegistry
-from gateway.app.telegram_menu import TelegramMenu, format_uplink_status
+from gateway.app.telegram_menu import TelegramMenu, format_exit_statuses
 
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID = str(os.environ["TELEGRAM_CHAT_ID"])
@@ -17,7 +18,9 @@ API = f"https://api.telegram.org/bot{TOKEN}"
 PANEL = "http://127.0.0.1:8080"
 POLL_TIMEOUT_SECONDS = 3
 API_HTTP_TIMEOUT_SECONDS = 8
-registry = ClientRegistry(Path(os.getenv("AWG_GATEWAY_STATE_DIR", "/var/lib/awg-gateway")) / "clients.sqlite3")
+state_dir = Path(os.getenv("AWG_GATEWAY_STATE_DIR", "/var/lib/awg-gateway"))
+registry = ClientRegistry(state_dir / "clients.sqlite3")
+exit_repository = ExitRepository(state_dir / "exits.sqlite3")
 menus: dict[str, TelegramMenu] = {}
 
 
@@ -79,8 +82,22 @@ def process(text: str) -> None:
         elif result.kind == "list":
             send("Клиенты:\n" + ("\n".join(result.choices) or "нет"), main_keyboard())
         elif result.kind == "status":
-            output = subprocess.run(["awg", "show", "awg-uplink", "latest-handshakes"], text=True, capture_output=True, check=True).stdout
-            send("Зарубежный VPS: " + format_uplink_status(output, int(time.time())), main_keyboard())
+            def read_handshake(interface: str) -> str:
+                return subprocess.run(
+                    ["awg", "show", interface, "latest-handshakes"],
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                ).stdout
+
+            send(
+                format_exit_statuses(
+                    exit_repository.list(),
+                    read_handshake,
+                    int(time.time()),
+                ),
+                main_keyboard(),
+            )
         elif result.kind == "panel":
             send("Панель доступна через SSH-туннель: http://127.0.0.1:8080", main_keyboard())
         elif result.kind == "cancelled":
