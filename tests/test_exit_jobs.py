@@ -9,6 +9,7 @@ from gateway.app.exit_jobs import ExitJobCoordinator
 from gateway.app.exit_provisioner import ProvisionCancelled
 from gateway.app.exit_store import ExitRepository, ExitStatus
 from gateway.app.models import ExitCreate
+from gateway.app.ssh_transport import SSHCommandError
 from pydantic import SecretStr
 
 
@@ -104,6 +105,27 @@ def test_restart_marks_interrupted_exit_error_and_does_not_balance_it(tmp_path):
     assert repository.get(record.id).status is ExitStatus.ERROR
     assert coordinator.active_state.exits == ()
     assert applier.desired_history == []
+
+
+def test_failed_remote_command_preserves_stage_and_safe_detail(tmp_path):
+    class FailingProvisioner(RecordingProvisioner):
+        def provision(self, record, credentials, progress, cancelled):
+            progress("packages")
+            raise SSHCommandError(
+                "Ошибка удалённой команды: пакет ядра недоступен"
+            )
+
+    repository = ExitRepository(tmp_path / "state.sqlite3")
+    provisioner = FailingProvisioner()
+    coordinator = ExitJobCoordinator(repository, provisioner, RecordingApplier())
+
+    record = coordinator.start(request("debian-12", "203.0.113.2"))
+    coordinator.shutdown()
+
+    failed = repository.get(record.id)
+    assert failed.status is ExitStatus.ERROR
+    assert failed.stage == "packages"
+    assert failed.error == "Удалённая установка: пакет ядра недоступен"
 
 
 def test_cancelled_job_cleans_local_state_and_never_enters_balancing(tmp_path):

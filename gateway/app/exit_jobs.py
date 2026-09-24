@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -22,9 +23,12 @@ from gateway.app.renderer import ExitRoute, GatewayState
 from gateway.app.ssh_transport import (
     HostKeyChangedError,
     SSHAuthenticationError,
+    SSHCommandError,
     SSHCredentials,
     SSHTimeoutError,
 )
+
+LOGGER = logging.getLogger(__name__)
 
 
 class Provisioner(Protocol):
@@ -48,6 +52,10 @@ def _public_error(exc: Exception) -> str:
         return str(exc)
     if isinstance(exc, SSHTimeoutError):
         return "VPS не ответил вовремя"
+    if isinstance(exc, SSHCommandError):
+        _prefix, _separator, detail = str(exc).partition(":")
+        safe_detail = " ".join((detail or str(exc)).split())[:240]
+        return f"Удалённая установка: {safe_detail}"
     return "Установка VPS завершилась ошибкой"
 
 
@@ -179,8 +187,11 @@ class ExitJobCoordinator:
             return
         with self._lock:
             credentials = self._credentials[exit_id]
+        last_stage = record.stage
 
         def progress(stage: str) -> None:
+            nonlocal last_stage
+            last_stage = stage
             self.repository.set_stage(exit_id, ExitStatus.INSTALLING, stage)
 
         try:
@@ -205,11 +216,16 @@ class ExitJobCoordinator:
                 "Установка остановлена пользователем",
             )
         except Exception as exc:
+            LOGGER.exception(
+                "Exit provisioning failed for %s at stage %s",
+                exit_id,
+                last_stage,
+            )
             self.provisioner.cleanup_local(record)
             self.repository.set_stage(
                 exit_id,
                 ExitStatus.ERROR,
-                "failed",
+                last_stage,
                 _public_error(exc),
             )
         finally:
