@@ -38,7 +38,7 @@ def render_policy_routes(state: GatewayState) -> list[list[str]]:
                 [
                     "ip",
                     "rule",
-                    "replace",
+                    "add",
                     "fwmark",
                     hex(exit_route.mark),
                     "lookup",

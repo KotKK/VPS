@@ -72,3 +72,15 @@ def test_removed_exit_is_cleaned_only_after_new_rules_activate():
     activate_index = runner.calls.index(("nft", "-f", "/run/awg-gateway/next.nft"))
     delete_index = runner.calls.index(("ip", "rule", "del", "fwmark", "0x66", "lookup", "102"))
     assert activate_index < delete_index
+
+
+def test_existing_policy_rule_is_deleted_before_supported_add_command():
+    runner = RecordingEgressRunner()
+
+    result = EgressApplier(runner).apply(GatewayState(()), one_exit_state())
+
+    assert result.active == one_exit_state()
+    delete = ("ip", "rule", "del", "fwmark", "0x65", "lookup", "101")
+    add = ("ip", "rule", "add", "fwmark", "0x65", "lookup", "101")
+    assert runner.calls.index(delete) < runner.calls.index(add)
+    assert not any(call[:3] == ("ip", "rule", "replace") for call in runner.calls)

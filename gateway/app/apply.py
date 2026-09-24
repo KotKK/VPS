@@ -62,6 +62,20 @@ class EgressApplier:
         return path
 
     def _install_routes(self, state: GatewayState) -> bool:
+        for route in state.exits:
+            # `ip rule` has no portable `replace` operation. Remove a possible
+            # prior copy first so repeated panel starts remain idempotent.
+            self.runner.run(
+                [
+                    "ip",
+                    "rule",
+                    "del",
+                    "fwmark",
+                    hex(route.mark),
+                    "lookup",
+                    str(route.route_table),
+                ]
+            )
         return all(self.runner.run(command) for command in render_policy_routes(state))
 
     def _restore(self, previous: GatewayState) -> None:

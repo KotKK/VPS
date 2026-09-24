@@ -16,8 +16,9 @@ def test_two_exits_receive_distinct_route_tables_and_marks():
     commands = render_policy_routes(GatewayState(exits=TwoExitState().exits))
     assert ["ip", "route", "replace", "default", "dev", "awg-uplink", "table", "101"] in commands
     assert ["ip", "route", "replace", "default", "dev", "awg-uplink-2", "table", "102"] in commands
-    assert ["ip", "rule", "replace", "fwmark", "0x65", "lookup", "101"] in commands
-    assert ["ip", "rule", "replace", "fwmark", "0x66", "lookup", "102"] in commands
+    assert ["ip", "rule", "add", "fwmark", "0x65", "lookup", "101"] in commands
+    assert ["ip", "rule", "add", "fwmark", "0x66", "lookup", "102"] in commands
+    assert all(command[:3] != ["ip", "rule", "replace"] for command in commands)
 
 
 def test_egress_marks_exclude_ssh_and_foreign_endpoints():
