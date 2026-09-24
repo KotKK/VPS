@@ -12,6 +12,7 @@ from pydantic import SecretStr
 
 from gateway.app.apply import ApplyResult
 from gateway.app.exit_provisioner import (
+    KernelModuleUnavailableError,
     ProvisionCancelled,
     UnsupportedRemoteOSError,
 )
@@ -42,7 +43,9 @@ def _public_error(exc: Exception) -> str:
     if isinstance(exc, HostKeyChangedError):
         return "SSH host key изменился; подключение заблокировано"
     if isinstance(exc, UnsupportedRemoteOSError):
-        return "Поддерживается только чистая Debian 13"
+        return "Поддерживаются только чистые Debian 12 и Debian 13"
+    if isinstance(exc, KernelModuleUnavailableError):
+        return str(exc)
     if isinstance(exc, SSHTimeoutError):
         return "VPS не ответил вовремя"
     return "Установка VPS завершилась ошибкой"

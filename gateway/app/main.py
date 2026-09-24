@@ -52,7 +52,7 @@ STATUS_LABELS = {
 STAGE_LABELS = {
     "queued": "Ожидание запуска",
     "ssh": "Подключение по SSH",
-    "os_check": "Проверка Debian 13",
+    "os_check": "Проверка Debian 12/13",
     "packages": "Установка пакетов",
     "remote_tunnel": "Настройка зарубежного туннеля",
     "local_tunnel": "Настройка российского шлюза",

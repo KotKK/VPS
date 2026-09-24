@@ -82,6 +82,15 @@ def test_installer_prepares_root_only_ssh_state_and_remote_script():
     assert "install -m 0700 gateway/deploy/remote-exit.sh" in script
 
 
+def test_debian_12_remote_install_is_pinned_to_verified_official_sources():
+    script = Path("gateway/deploy/remote-exit.sh").read_text(encoding="utf-8")
+    assert "ae0924ca700520ca34c5bdbcfd05b2f683ea9353" in script
+    assert "61e741780e8465a67a7d7fb6cffe14a8a15d624a" in script
+    assert "https://github.com/amnezia-vpn/amneziawg-linux-kernel-module.git" in script
+    assert "https://github.com/amnezia-vpn/amneziawg-tools.git" in script
+    assert "dkms install -m amneziawg -v 1.0.0" in script
+
+
 def test_operations_doc_uses_a_password_placeholder_only():
     text = Path("docs/panel-vps-operations.md").read_text(encoding="utf-8")
     assert "<ПАРОЛЬ_НОВОГО_VPS>" in text

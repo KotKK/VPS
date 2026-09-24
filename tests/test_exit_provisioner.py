@@ -12,7 +12,7 @@ from gateway.app.exit_provisioner import (
 )
 from gateway.app.exit_store import ExitRepository
 from gateway.app.keygen import AwgKeyPair
-from gateway.app.ssh_transport import SSHCredentials, SSHResult
+from gateway.app.ssh_transport import SSHCommandError, SSHCredentials, SSHResult
 
 
 class FakeSession:
@@ -84,7 +84,7 @@ def credentials():
     )
 
 
-def test_provisioner_rejects_non_debian_13_before_install(tmp_path):
+def test_provisioner_rejects_unsupported_os_before_install(tmp_path):
     session = FakeSession('ID=ubuntu\nVERSION_ID="24.04"\n')
     local = FakeLocalManager()
     provisioner = ExitProvisioner(
@@ -96,6 +96,59 @@ def test_provisioner_rejects_non_debian_13_before_install(tmp_path):
 
     assert not any("packages" in command for command in session.commands)
     assert local.started == []
+
+
+@pytest.mark.parametrize("version", ["12", "13"])
+def test_provisioner_accepts_supported_debian_versions(tmp_path, version):
+    session = FakeSession(f'ID=debian\nVERSION_ID="{version}"\n')
+    local = FakeLocalManager()
+    record = build_record(tmp_path)
+    provisioner = ExitProvisioner(
+        FakeTransport(session), local, Path("gateway/deploy/remote-exit.sh")
+    )
+
+    provisioner.provision(record, credentials(), lambda _stage: None, lambda: False)
+
+    assert any("packages" in command for command in session.commands)
+    assert local.started == [record.id]
+
+
+def test_provisioner_rejects_debian_11_before_install(tmp_path):
+    session = FakeSession('ID=debian\nVERSION_ID="11"\n')
+    local = FakeLocalManager()
+    provisioner = ExitProvisioner(
+        FakeTransport(session), local, Path("gateway/deploy/remote-exit.sh")
+    )
+
+    with pytest.raises(
+        UnsupportedRemoteOSError,
+        match="Debian 12.*Debian 13",
+    ):
+        provisioner.provision(
+            build_record(tmp_path), credentials(), lambda _stage: None, lambda: False
+        )
+
+    assert not any("packages" in command for command in session.commands)
+
+
+def test_provisioner_explains_when_host_kernel_cannot_load_module(tmp_path):
+    class ModuleFailureSession(FakeSession):
+        def run(self, args, stdin=None):
+            if "packages" in args:
+                raise SSHCommandError(
+                    "Ошибка удалённой команды: AWG_KERNEL_MODULE_UNAVAILABLE"
+                )
+            return super().run(args, stdin)
+
+    session = ModuleFailureSession('ID=debian\nVERSION_ID="12"\n')
+    provisioner = ExitProvisioner(
+        FakeTransport(session), FakeLocalManager(), Path("gateway/deploy/remote-exit.sh")
+    )
+
+    with pytest.raises(RuntimeError, match="ядро VPS не может загрузить"):
+        provisioner.provision(
+            build_record(tmp_path), credentials(), lambda _stage: None, lambda: False
+        )
 
 
 def test_cancel_after_remote_configuration_cleans_local_artifacts(tmp_path):

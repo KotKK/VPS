@@ -1,4 +1,4 @@
-"""Orchestrate one foreign Debian 13 AmneziaWG exit installation."""
+"""Orchestrate one foreign Debian 12/13 AmneziaWG exit installation."""
 
 from __future__ import annotations
 
@@ -8,10 +8,19 @@ from typing import Callable, Protocol
 
 from gateway.app.exit_network import LocalUplinkManager, TunnelAllocation
 from gateway.app.exit_store import ExitRecord
-from gateway.app.ssh_transport import SSHCredentials, SSHTransport, SSHTransportError
+from gateway.app.ssh_transport import (
+    SSHCommandError,
+    SSHCredentials,
+    SSHTransport,
+    SSHTransportError,
+)
 
 
 class UnsupportedRemoteOSError(RuntimeError):
+    pass
+
+
+class KernelModuleUnavailableError(RuntimeError):
     pass
 
 
@@ -87,15 +96,26 @@ class ExitProvisioner:
                 os_release = _parse_os_release(
                     session.run(["cat", "/etc/os-release"]).stdout
                 )
-                if os_release.get("ID") != "debian" or os_release.get("VERSION_ID") != "13":
+                if (
+                    os_release.get("ID") != "debian"
+                    or os_release.get("VERSION_ID") not in {"12", "13"}
+                ):
                     raise UnsupportedRemoteOSError(
-                        "Поддерживается только чистая Debian 13"
+                        "Поддерживаются только чистые Debian 12 и Debian 13"
                     )
 
                 session.put_bytes(script_path, self.remote_script.read_bytes(), 0o700)
                 progress("packages")
                 self._check_cancel(cancelled)
-                session.run(["bash", script_path, "packages"])
+                try:
+                    session.run(["bash", script_path, "packages"])
+                except SSHCommandError as exc:
+                    if "AWG_KERNEL_MODULE_UNAVAILABLE" in str(exc):
+                        raise KernelModuleUnavailableError(
+                            "ядро VPS не может загрузить модуль AmneziaWG; "
+                            "для LXC модуль должен быть разрешён на хосте"
+                        ) from exc
+                    raise
 
                 keys = self.local_manager.generate_keys()
                 progress("remote_tunnel")
@@ -147,6 +167,7 @@ class ExitProvisioner:
 
 __all__ = [
     "ExitProvisioner",
+    "KernelModuleUnavailableError",
     "ProvisionCancelled",
     "UnsupportedRemoteOSError",
 ]
