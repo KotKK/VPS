@@ -352,7 +352,14 @@ def production_exit_jobs() -> ExitJobCoordinator:
     seed_existing_exit(repository)
     local_manager = LocalUplinkManager(SubprocessTextRunner())
     transport = SSHTransport(state_dir / "known_hosts")
-    remote_script = Path(__file__).resolve().parents[1] / "deploy" / "remote-exit.sh"
+    remote_script = Path(
+        os.getenv(
+            "AWG_REMOTE_EXIT_SCRIPT",
+            "/usr/local/libexec/awg-gateway-remote-exit",
+        )
+    )
+    if not remote_script.exists():
+        remote_script = Path(__file__).resolve().parents[1] / "deploy" / "remote-exit.sh"
     provisioner = ExitProvisioner(transport, local_manager, remote_script)
     applier = EgressApplier(SubprocessEgressRunner())
     return ExitJobCoordinator(repository, provisioner, applier)

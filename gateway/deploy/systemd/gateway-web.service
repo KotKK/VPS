@@ -14,9 +14,8 @@ Restart=on-failure
 NoNewPrivileges=yes
 ProtectSystem=strict
 PrivateTmp=yes
-IPAddressDeny=any
-IPAddressAllow=localhost
-ReadWritePaths=/var/lib/awg-gateway /etc/amnezia
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/awg-gateway /etc/amnezia /etc/systemd/system /run/awg-gateway
 
 [Install]
 WantedBy=multi-user.target

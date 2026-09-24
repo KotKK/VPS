@@ -62,3 +62,27 @@ def test_health_timer_runs_monitor_without_exposing_telegram_secrets():
     assert "TELEGRAM_BOT_TOKEN" in script
     assert "ExecStart=/opt/awg-gateway/gateway/deploy/health-check.sh" in unit
     assert "OnUnitActiveSec=60" in timer
+
+
+def test_web_service_allows_outbound_ssh_but_remains_loopback_only():
+    unit = Path("gateway/deploy/systemd/gateway-web.service").read_text(
+        encoding="utf-8"
+    )
+    assert "--host 127.0.0.1 --port 8080" in unit
+    assert "IPAddressDeny=any" not in unit
+    assert "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6" in unit
+    assert "ReadWritePaths=/var/lib/awg-gateway /etc/amnezia /etc/systemd/system /run/awg-gateway" in unit
+
+
+def test_installer_prepares_root_only_ssh_state_and_remote_script():
+    script = Path("gateway/deploy/install.sh").read_text(encoding="utf-8")
+    assert "install -d -m 0700 /var/lib/awg-gateway /run/awg-gateway" in script
+    assert "touch /var/lib/awg-gateway/known_hosts" in script
+    assert "chmod 0600 /var/lib/awg-gateway/known_hosts" in script
+    assert "install -m 0700 gateway/deploy/remote-exit.sh" in script
+
+
+def test_operations_doc_uses_a_password_placeholder_only():
+    text = Path("docs/panel-vps-operations.md").read_text(encoding="utf-8")
+    assert "<ПАРОЛЬ_НОВОГО_VPS>" in text
+    assert "пароль не сохраняется" in text.lower()
