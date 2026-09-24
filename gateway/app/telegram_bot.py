@@ -15,6 +15,7 @@ TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID = str(os.environ["TELEGRAM_CHAT_ID"])
 API = f"https://api.telegram.org/bot{TOKEN}"
 PANEL = "http://127.0.0.1:8080"
+POLL_TIMEOUT_SECONDS = 3
 registry = ClientRegistry(Path(os.getenv("AWG_GATEWAY_STATE_DIR", "/var/lib/awg-gateway")) / "clients.sqlite3")
 menus: dict[str, TelegramMenu] = {}
 
@@ -43,6 +44,15 @@ def panel_post(path: str, values: dict[str, str]) -> None:
     request = Request(PANEL + path, data=urlencode(values).encode(), method="POST")
     with urlopen(request, timeout=45) as response:
         response.read()
+
+
+def get_updates(offset: int) -> list[dict]:
+    """Use short polling because long-lived responses are buffered by the VPN path."""
+    result = api(
+        "getUpdates",
+        {"offset": str(offset), "timeout": str(POLL_TIMEOUT_SECONDS)},
+    )
+    return list(result.get("result", []))
 
 
 def process(text: str) -> None:
@@ -90,8 +100,7 @@ def run() -> None:
     send("Меню управления AmneziaWG готово.", main_keyboard())
     while True:
         try:
-            result = api("getUpdates", {"offset": str(offset), "timeout": "50"})
-            for update in result.get("result", []):
+            for update in get_updates(offset):
                 offset = int(update["update_id"]) + 1
                 message = update.get("message", {})
                 if str(message.get("chat", {}).get("id")) == CHAT_ID and isinstance(message.get("text"), str):
