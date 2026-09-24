@@ -21,10 +21,12 @@ def test_two_exits_receive_distinct_route_tables_and_marks():
     assert all(command[:3] != ["ip", "rule", "replace"] for command in commands)
 
 
-def test_egress_marks_exclude_ssh_and_foreign_endpoints():
-    """A route loop must not capture SSH or an exit tunnel's UDP endpoint."""
+def test_egress_marks_all_external_client_services_but_keeps_gateway_local():
+    """DNS and other forwarded services must use an exit while local control stays local."""
     rules = render_egress_nft(GatewayState(exits=TwoExitState().exits))
-    assert "tcp dport 22 return" in rules
+    assert "fib daddr type local return" in rules
+    assert "tcp dport 22 return" not in rules
+    assert "udp dport { 53, 123 } return" not in rules
     assert "ip daddr { 153.76.194.217, 203.0.113.2 } return" in rules
     assert "meta mark != 0 return" in rules
 

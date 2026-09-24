@@ -69,9 +69,8 @@ def render_egress_nft(state: GatewayState) -> str:
         "  chain mark_client_egress {",
         "    type filter hook prerouting priority mangle; policy accept;",
         "    iifname != \"awg-clients\" return",
+        "    fib daddr type local return",
         "    ip saddr 127.0.0.0/8 return",
-        "    tcp dport 22 return",
-        "    udp dport { 53, 123 } return",
     ]
     if endpoints:
         lines.append(f"    ip daddr {{ {endpoints} }} return")
