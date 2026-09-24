@@ -41,6 +41,7 @@ def test_staged_local_uplink_contains_allocated_addresses_and_remote_endpoint(tm
     config = (tmp_path / "amnezia" / "awg-uplink.conf").read_text(encoding="utf-8")
     unit = (tmp_path / "systemd" / "awg-uplink.service").read_text(encoding="utf-8")
     assert "Address = 10.200.0.2/30" in config
+    assert "Table = off" in config
     assert "Endpoint = 203.0.113.3:49001" in config
     assert "PrivateKey = local-private" in config
     assert "PublicKey = remote-public" in config

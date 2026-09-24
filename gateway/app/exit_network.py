@@ -84,6 +84,7 @@ class LocalUplinkManager:
                 "[Interface]",
                 f"PrivateKey = {local_private_key}",
                 f"Address = {allocation.local_address}/30",
+                "Table = off",
                 "Jc = 4",
                 "Jmin = 8",
                 "Jmax = 80",
