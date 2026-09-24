@@ -188,6 +188,23 @@ class ExitRepository:
         assert record is not None
         return record
 
+    def set_warning(self, exit_id: str, stage: str, warning: str) -> ExitRecord:
+        now = datetime.now(UTC).isoformat()
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE exits
+                SET status = ?, stage = ?, error = '', warning = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (ExitStatus.ERROR.value, stage, warning, now, exit_id),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError(exit_id)
+        record = self.get(exit_id)
+        assert record is not None
+        return record
+
     def request_cancel(self, exit_id: str) -> None:
         with self._connect() as connection:
             cursor = connection.execute(

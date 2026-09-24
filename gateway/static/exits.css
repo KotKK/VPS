@@ -43,3 +43,29 @@
 .warning-text {
   color: #ffd60a;
 }
+
+.credential-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.credential-action input {
+  width: 190px;
+  margin: 0;
+  padding: 8px 10px;
+}
+
+.acknowledge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: #ffd60a;
+  font-weight: 600;
+}
+
+.acknowledge input {
+  width: auto;
+  margin: 0;
+}

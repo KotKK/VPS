@@ -132,6 +132,44 @@ class ExitJobCoordinator:
     def cancel(self, exit_id: str) -> None:
         self.repository.request_cancel(exit_id)
 
+    def delete(
+        self,
+        exit_id: str,
+        password: SecretStr | None,
+        acknowledge: bool,
+    ) -> ExitRecord:
+        record = self.repository.get(exit_id)
+        if record is None:
+            raise KeyError(exit_id)
+        ready = [
+            item for item in self.repository.list() if item.status is ExitStatus.READY
+        ]
+        if record.status is ExitStatus.READY and len(ready) == 1 and not acknowledge:
+            raise ValueError("Нужно подтвердить: это последний доступный VPS")
+        if record.status in {ExitStatus.INSTALLING, ExitStatus.DELETING}:
+            raise ValueError("VPS уже выполняет сетевую операцию")
+
+        discard_warning = record.stage == "remote_cleanup"
+        deleting = self.repository.set_stage(
+            exit_id,
+            ExitStatus.DELETING,
+            "remove_balance",
+        )
+        credentials = None
+        if password is not None and password.get_secret_value():
+            credentials = SSHCredentials(
+                IPv4Address(record.address), "root", password
+            )
+        with self._lock:
+            if credentials is not None:
+                self._credentials[exit_id] = credentials
+            self._futures[exit_id] = self._executor.submit(
+                self._delete,
+                deleting,
+                discard_warning,
+            )
+        return deleting
+
     def _install(self, exit_id: str) -> None:
         record = self.repository.get(exit_id)
         if record is None:
@@ -174,6 +212,38 @@ class ExitJobCoordinator:
         finally:
             with self._lock:
                 self._credentials.pop(exit_id, None)
+
+    def _delete(self, record: ExitRecord, discard_warning: bool) -> None:
+        with self._lock:
+            credentials = self._credentials.get(record.id)
+        try:
+            desired = self._ready_state()
+            result = self.applier.apply(self._active_state, desired)
+            if result.active != desired:
+                raise RuntimeError("Не удалось исключить VPS из балансировки")
+            self._active_state = desired
+            self.provisioner.cleanup_local(record)
+
+            warning = None
+            if credentials is not None:
+                warning = self.provisioner.cleanup_remote(record, credentials)
+            elif not discard_warning:
+                warning = "Удалённая очистка не завершена"
+
+            if warning:
+                self.repository.set_warning(record.id, "remote_cleanup", warning)
+            else:
+                self.repository.delete(record.id)
+        except Exception as exc:
+            self.repository.set_stage(
+                record.id,
+                ExitStatus.ERROR,
+                "delete_failed",
+                _public_error(exc),
+            )
+        finally:
+            with self._lock:
+                self._credentials.pop(record.id, None)
 
     def shutdown(self) -> None:
         self._executor.shutdown(wait=True, cancel_futures=False)

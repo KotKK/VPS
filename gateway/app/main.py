@@ -11,6 +11,7 @@ from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from pydantic import SecretStr
 
 from gateway.app.models import ExitCreate, validate_name
 from gateway.app.profiles import qr_png
@@ -146,6 +147,9 @@ def create_app(
             ]
         else:
             exit_rows = [_record_view(record) for record in jobs.repository.list()]
+        ready_count = sum(row["status"] == "ready" for row in exit_rows)
+        for row in exit_rows:
+            row["last_ready"] = row["status"] == "ready" and ready_count == 1
         return templates.TemplateResponse(
             request,
             "exits.html",
@@ -260,8 +264,55 @@ def create_app(
         jobs.cancel(exit_id)
         return RedirectResponse("/exits", status_code=303)
 
+    @app.post("/exits/{exit_id}/retry")
+    def retry_exit(exit_id: str, password: str = Form(...)) -> RedirectResponse:
+        jobs = jobs_holder["jobs"]
+        if jobs is None:
+            raise HTTPException(503, "exit jobs are not configured")
+        if not password:
+            raise HTTPException(422, "password is required")
+        record = jobs.repository.get(exit_id)
+        if record is None:
+            raise HTTPException(404, "exit not found")
+        if record.status is not ExitStatus.ERROR:
+            raise HTTPException(409, "only a failed exit can be retried")
+        jobs.retry(exit_id, SecretStr(password))
+        return RedirectResponse("/exits", status_code=303)
+
     @app.post("/exits/{exit_id}/delete", response_class=HTMLResponse)
-    def delete_exit(exit_id: str, acknowledge: bool = Form(False)) -> Response:
+    def delete_exit(
+        exit_id: str,
+        acknowledge: bool = Form(False),
+        password: str = Form(""),
+    ) -> Response:
+        jobs = jobs_holder["jobs"]
+        if jobs is not None:
+            selected_record = jobs.repository.get(exit_id)
+            if selected_record is None:
+                raise HTTPException(404, "exit not found")
+            ready_records = [
+                record
+                for record in jobs.repository.list()
+                if record.status is ExitStatus.READY
+            ]
+            if (
+                selected_record.status is ExitStatus.READY
+                and len(ready_records) == 1
+                and not acknowledge
+            ):
+                return HTMLResponse(
+                    "Нужно подтвердить: это последний доступный VPS",
+                    status_code=409,
+                )
+            try:
+                jobs.delete(
+                    exit_id,
+                    SecretStr(password) if password else None,
+                    acknowledge,
+                )
+            except ValueError as exc:
+                raise HTTPException(409, str(exc)) from exc
+            return RedirectResponse("/exits", status_code=303)
         selected = next((node for node in store.exits if node["id"] == exit_id), None)
         if selected is None:
             raise HTTPException(404, "exit not found")

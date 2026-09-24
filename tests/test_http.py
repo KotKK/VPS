@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+from ipaddress import IPv4Address
 from pathlib import Path
 
 from gateway.app.main import StateStore, create_app
@@ -22,6 +23,8 @@ class FakeExitJobs:
         self.repository = repository
         self.started = []
         self.cancelled = []
+        self.deleted = []
+        self.retried = []
 
     def start(self, request):
         self.started.append(request)
@@ -36,6 +39,14 @@ class FakeExitJobs:
 
     def shutdown(self):
         pass
+
+    def retry(self, exit_id, password):
+        self.retried.append((exit_id, password))
+        return self.repository.prepare_retry(exit_id)
+
+    def delete(self, exit_id, password, acknowledge):
+        self.deleted.append((exit_id, password, acknowledge))
+        return self.repository.get(exit_id)
 
 
 def test_create_exit_calls_provisioner_before_it_appears_in_panel():
@@ -139,6 +150,37 @@ def test_existing_live_uplink_is_seeded_once_without_reallocation(tmp_path):
     assert first.slot == 1
     assert first.interface == "awg-uplink"
     assert first.status is ExitStatus.READY
+
+
+def test_job_backed_final_ready_exit_requires_russian_acknowledgement(tmp_path):
+    repository = ExitRepository(tmp_path / "exits.sqlite3")
+    record = repository.create("de", IPv4Address("203.0.113.2"))
+    repository.set_stage(record.id, ExitStatus.READY, "ready")
+    client = TestClient(create_app(StateStore(), exit_jobs=FakeExitJobs(repository)))
+
+    response = client.post(
+        f"/exits/{record.id}/delete",
+        data={"password": "secret"},
+    )
+
+    assert response.status_code == 409
+    assert "последний доступный VPS" in response.text
+
+
+def test_retry_requires_a_fresh_password(tmp_path):
+    repository = ExitRepository(tmp_path / "exits.sqlite3")
+    record = repository.create("de", IPv4Address("203.0.113.2"))
+    repository.set_stage(record.id, ExitStatus.ERROR, "failed", "Ошибка")
+    jobs = FakeExitJobs(repository)
+    client = TestClient(create_app(StateStore(), exit_jobs=jobs))
+
+    response = client.post(
+        f"/exits/{record.id}/retry",
+        data={"password": ""},
+    )
+
+    assert response.status_code == 422
+    assert jobs.retried == []
 
 
 def test_cancelled_client_form_does_not_persist_a_client():

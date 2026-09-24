@@ -2,6 +2,8 @@ import threading
 import time
 from ipaddress import IPv4Address
 
+import pytest
+
 from gateway.app.apply import ApplyResult
 from gateway.app.exit_jobs import ExitJobCoordinator
 from gateway.app.exit_provisioner import ProvisionCancelled
@@ -18,6 +20,7 @@ class RecordingProvisioner:
         self.max_concurrent_calls = 0
         self.calls = []
         self.cleaned = []
+        self.cleanup_warning = None
 
     def provision(self, record, credentials, progress, cancelled):
         with self._lock:
@@ -37,6 +40,9 @@ class RecordingProvisioner:
 
     def cleanup_local(self, record):
         self.cleaned.append(record.id)
+
+    def cleanup_remote(self, record, credentials):
+        return self.cleanup_warning
 
 
 class RecordingApplier:
@@ -131,3 +137,43 @@ def test_retry_reuses_allocation_with_a_fresh_in_memory_password(tmp_path):
     assert retried.slot == record.slot
     assert repository.get(record.id).status is ExitStatus.READY
     assert record.id not in coordinator._credentials
+
+
+def test_unreachable_remote_is_removed_from_balancing_and_kept_as_warning(tmp_path):
+    repository = ExitRepository(tmp_path / "state.sqlite3")
+    record = repository.create("de", IPv4Address("203.0.113.2"))
+    repository.set_stage(record.id, ExitStatus.READY, "ready")
+    provisioner = RecordingProvisioner()
+    provisioner.cleanup_warning = "Удалённая очистка не завершена"
+    applier = RecordingApplier()
+    coordinator = ExitJobCoordinator(repository, provisioner, applier)
+
+    coordinator.delete(
+        record.id,
+        SecretStr("fresh-password"),
+        acknowledge=True,
+    )
+    coordinator.shutdown()
+
+    retained = repository.get(record.id)
+    assert retained is not None
+    assert retained.status is ExitStatus.ERROR
+    assert retained.stage == "remote_cleanup"
+    assert retained.warning == "Удалённая очистка не завершена"
+    assert coordinator.active_state.exits == ()
+    assert record.id in provisioner.cleaned
+
+
+def test_final_ready_exit_requires_acknowledgement_before_mutation(tmp_path):
+    repository = ExitRepository(tmp_path / "state.sqlite3")
+    record = repository.create("de", IPv4Address("203.0.113.2"))
+    repository.set_stage(record.id, ExitStatus.READY, "ready")
+    coordinator = ExitJobCoordinator(
+        repository, RecordingProvisioner(), RecordingApplier()
+    )
+
+    with pytest.raises(ValueError, match="последний доступный VPS"):
+        coordinator.delete(record.id, SecretStr("secret"), acknowledge=False)
+    coordinator.shutdown()
+
+    assert repository.get(record.id).status is ExitStatus.READY

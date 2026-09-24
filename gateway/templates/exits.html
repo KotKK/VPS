@@ -33,8 +33,19 @@
         <form class="inline-form" method="post" action="/exits/{{ node.id }}/cancel">
           <button class="secondary" type="submit">Остановить установку</button>
         </form>
+        {% elif node.status == "error" and node.stage != "remote_cleanup" %}
+        <form class="inline-form credential-action" method="post" action="/exits/{{ node.id }}/retry">
+          <input name="password" type="password" required autocomplete="new-password" placeholder="Новый пароль root">
+          <button type="submit">Повторить</button>
+        </form>
+        <form class="inline-form credential-action" method="post" action="/exits/{{ node.id }}/delete">
+          <input name="password" type="password" autocomplete="new-password" placeholder="Пароль для очистки">
+          <button class="danger" type="submit">Удалить VPS</button>
+        </form>
         {% else %}
-        <form class="inline-form" method="post" action="/exits/{{ node.id }}/delete" onsubmit="return confirm('Удалить VPS из балансировки?');">
+        <form class="inline-form credential-action" method="post" action="/exits/{{ node.id }}/delete" onsubmit="return confirm('Удалить VPS из балансировки?');">
+          {% if node.status == "ready" %}<input name="password" type="password" autocomplete="new-password" placeholder="Пароль root для очистки">{% endif %}
+          {% if node.last_ready %}<label class="acknowledge"><input type="checkbox" name="acknowledge" value="true">Подтверждаю удаление последнего выхода</label>{% endif %}
           <button class="danger" type="submit">Удалить VPS</button>
         </form>
         {% endif %}
