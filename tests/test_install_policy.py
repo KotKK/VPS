@@ -91,6 +91,12 @@ def test_debian_12_remote_install_is_pinned_to_verified_official_sources():
     assert "dkms install -m amneziawg -v 1.0.0" in script
 
 
+def test_remote_configuration_cleanup_does_not_defer_a_local_variable():
+    script = Path("gateway/deploy/remote-exit.sh").read_text(encoding="utf-8")
+    assert "trap 'rm -f \"$environment_file\"' EXIT" not in script
+    assert "trap - EXIT" in script
+
+
 def test_operations_doc_uses_a_password_placeholder_only():
     text = Path("docs/panel-vps-operations.md").read_text(encoding="utf-8")
     assert "<ПАРОЛЬ_НОВОГО_VPS>" in text

@@ -108,7 +108,7 @@ configure_exit() {
   # This root-owned file is uploaded by the typed controller, not browser text.
   # shellcheck disable=SC1090
   source "$environment_file"
-  trap 'rm -f "$environment_file"' EXIT
+  trap "rm -f -- '$environment_file'" EXIT
 
   [[ ${EXIT_INTERFACE:-} =~ ^[A-Za-z0-9_.-]+$ ]]
   [[ ${REMOTE_ADDRESS:-} =~ ^[0-9.]+/[0-9]+$ ]]
@@ -205,6 +205,8 @@ EOF
   systemctl daemon-reload
   systemctl enable --now awg-exit.service awg-exit-routing.service
   printf '%s\n' "$remote_public_key"
+  rm -f -- "$environment_file"
+  trap - EXIT
 }
 
 cleanup_exit() {
