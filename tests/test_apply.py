@@ -84,3 +84,13 @@ def test_existing_policy_rule_is_deleted_before_supported_add_command():
     add = ("ip", "rule", "add", "fwmark", "0x65", "lookup", "101")
     assert runner.calls.index(delete) < runner.calls.index(add)
     assert not any(call[:3] == ("ip", "rule", "replace") for call in runner.calls)
+
+
+def test_legacy_source_rule_is_removed_only_after_new_generation_activates():
+    runner = RecordingEgressRunner()
+
+    EgressApplier(runner).apply(GatewayState(()), one_exit_state())
+
+    activate = ("nft", "-f", "/run/awg-gateway/next.nft")
+    legacy = ("ip", "rule", "del", "from", "10.20.0.0/24", "lookup", "101")
+    assert runner.calls.index(activate) < runner.calls.index(legacy)

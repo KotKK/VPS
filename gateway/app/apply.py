@@ -96,6 +96,22 @@ class EgressApplier:
             self._restore(previous)
             return ApplyResult(active=previous, rolled_back=True)
 
+        # Older installations routed the whole client subnet directly to
+        # table 101. It has a higher priority than the per-flow fwmark rules,
+        # so leave it in place until the replacement generation is active,
+        # then remove it to enable balancing.
+        self.runner.run(
+            [
+                "ip",
+                "rule",
+                "del",
+                "from",
+                "10.20.0.0/24",
+                "lookup",
+                "101",
+            ]
+        )
+
         desired_tables = {route.route_table for route in desired.exits}
         for stale in previous.exits:
             if stale.route_table in desired_tables:
