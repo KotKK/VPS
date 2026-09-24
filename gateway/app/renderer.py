@@ -63,6 +63,8 @@ def render_egress_nft(state: GatewayState) -> str:
         else "    return"
     )
     lines = [
+        "table inet awg_gateway",
+        "flush table inet awg_gateway",
         "table inet awg_gateway {",
         "  chain mark_client_egress {",
         "    type filter hook prerouting priority mangle; policy accept;",

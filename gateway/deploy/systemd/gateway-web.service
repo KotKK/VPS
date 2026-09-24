@@ -14,7 +14,7 @@ Restart=on-failure
 NoNewPrivileges=yes
 ProtectSystem=strict
 PrivateTmp=yes
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 ReadWritePaths=/var/lib/awg-gateway /etc/amnezia /etc/systemd/system /run/awg-gateway
 
 [Install]

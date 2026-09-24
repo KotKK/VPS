@@ -70,7 +70,7 @@ def test_web_service_allows_outbound_ssh_but_remains_loopback_only():
     )
     assert "--host 127.0.0.1 --port 8080" in unit
     assert "IPAddressDeny=any" not in unit
-    assert "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6" in unit
+    assert "RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK" in unit
     assert "ReadWritePaths=/var/lib/awg-gateway /etc/amnezia /etc/systemd/system /run/awg-gateway" in unit
 
 

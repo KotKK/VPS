@@ -31,6 +31,9 @@ def test_egress_marks_exclude_ssh_and_foreign_endpoints():
 
 def test_existing_flow_restores_connection_mark():
     rules = render_egress_nft(GatewayState(exits=TwoExitState().exits))
+    assert rules.startswith(
+        "table inet awg_gateway\nflush table inet awg_gateway\n"
+    )
     assert "ct mark != 0 meta mark set ct mark" in rules
     assert "ct state new ct mark 0 meta mark set numgen random mod 2" in rules
     assert "ct mark set meta mark" in rules
