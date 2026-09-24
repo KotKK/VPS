@@ -1,0 +1,14 @@
+[Unit]
+Description=Route Telegram through the foreign AmneziaWG uplink
+Requires=awg-uplink.service
+After=network-online.target awg-uplink.service
+Before=gateway-telegram.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash /opt/awg-gateway/gateway/deploy/telegram-vpn-route.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+

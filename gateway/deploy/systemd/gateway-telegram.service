@@ -1,6 +1,8 @@
 [Unit]
 Description=AmneziaWG Telegram management menu
+Requires=gateway-telegram-route.service
 After=network-online.target gateway-web.service
+After=gateway-telegram-route.service
 Wants=network-online.target
 
 [Service]

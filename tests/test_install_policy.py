@@ -18,8 +18,40 @@ def test_exit_routing_provisioner_persists_forwarding_nat_and_client_route():
     assert '[[ $(id -u) -eq 0 ]] || exit 64' in script
     assert "net.ipv4.ip_forward = 1" in script
     assert 'ip route replace "$CLIENT_SUBNET" dev "$EXIT_INTERFACE"' in script
-    assert 'oifname "$WAN_INTERFACE" ip saddr $CLIENT_SUBNET masquerade' in script
+    assert "GATEWAY_UPLINK_ADDRESS=${AWG_GATEWAY_UPLINK_ADDRESS:-10.200.0.2}" in script
+    assert 'ip saddr { $CLIENT_SUBNET, $GATEWAY_UPLINK_ADDRESS } accept' in script
+    assert 'ip saddr { $CLIENT_SUBNET, $GATEWAY_UPLINK_ADDRESS } masquerade' in script
     assert "ExecStartPre=-/usr/sbin/nft delete table ip awg_exit" in script
+
+
+def test_telegram_is_routed_through_awg_uplink_before_bot_starts():
+    route_script = Path("gateway/deploy/telegram-vpn-route.sh").read_text(encoding="utf-8")
+    route_unit = Path(
+        "gateway/deploy/systemd/gateway-telegram-route.service"
+    ).read_text(encoding="utf-8")
+    bot_unit = Path("gateway/deploy/systemd/gateway-telegram.service").read_text(
+        encoding="utf-8"
+    )
+
+    telegram_ipv4_subnets = (
+        "91.108.56.0/22",
+        "91.108.4.0/22",
+        "91.108.8.0/22",
+        "91.108.16.0/22",
+        "91.108.12.0/22",
+        "149.154.160.0/20",
+        "91.105.192.0/23",
+        "91.108.20.0/22",
+        "185.76.151.0/24",
+    )
+    for subnet in telegram_ipv4_subnets:
+        assert subnet in route_script
+
+    assert 'ip route replace "$subnet" dev "$UPLINK_INTERFACE"' in route_script
+    assert "Requires=awg-uplink.service" in route_unit
+    assert "Before=gateway-telegram.service" in route_unit
+    assert "Requires=gateway-telegram-route.service" in bot_unit
+    assert "After=gateway-telegram-route.service" in bot_unit
 
 
 def test_health_timer_runs_monitor_without_exposing_telegram_secrets():

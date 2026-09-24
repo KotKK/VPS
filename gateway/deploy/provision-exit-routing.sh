@@ -6,11 +6,13 @@ set -euo pipefail
 
 EXIT_INTERFACE=${AWG_EXIT_INTERFACE:-awg-exit}
 CLIENT_SUBNET=${AWG_CLIENT_SUBNET:-10.20.0.0/24}
+GATEWAY_UPLINK_ADDRESS=${AWG_GATEWAY_UPLINK_ADDRESS:-10.200.0.2}
 WAN_INTERFACE=${AWG_WAN_INTERFACE:-$(ip -4 route show default | awk 'NR==1 {print $5}')}
 
 [[ $EXIT_INTERFACE =~ ^[A-Za-z0-9_.-]+$ ]] || { echo "Invalid exit interface" >&2; exit 64; }
 [[ $WAN_INTERFACE =~ ^[A-Za-z0-9_.-]+$ ]] || { echo "Unable to determine WAN interface" >&2; exit 64; }
 [[ $CLIENT_SUBNET =~ ^[0-9.]+/[0-9]+$ ]] || { echo "Invalid client subnet" >&2; exit 64; }
+[[ $GATEWAY_UPLINK_ADDRESS =~ ^[0-9.]+$ ]] || { echo "Invalid gateway uplink address" >&2; exit 64; }
 
 install -d -m 0700 /etc/amnezia
 printf 'net.ipv4.ip_forward = 1\n' >/etc/sysctl.d/90-awg-exit.conf
@@ -21,12 +23,12 @@ cat >/etc/amnezia/awg-exit-nat.nft <<EOF
 table ip awg_exit {
   chain forward {
     type filter hook forward priority filter; policy drop;
-    iifname "$EXIT_INTERFACE" oifname "$WAN_INTERFACE" ip saddr $CLIENT_SUBNET accept
+    iifname "$EXIT_INTERFACE" oifname "$WAN_INTERFACE" ip saddr { $CLIENT_SUBNET, $GATEWAY_UPLINK_ADDRESS } accept
     iifname "$WAN_INTERFACE" oifname "$EXIT_INTERFACE" ct state established,related accept
   }
   chain postrouting {
     type nat hook postrouting priority srcnat; policy accept;
-    oifname "$WAN_INTERFACE" ip saddr $CLIENT_SUBNET masquerade
+    oifname "$WAN_INTERFACE" ip saddr { $CLIENT_SUBNET, $GATEWAY_UPLINK_ADDRESS } masquerade
   }
 }
 EOF
