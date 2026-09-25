@@ -203,7 +203,8 @@ ExecStop=-/usr/sbin/ip route del $CLIENT_SUBNET dev $EXIT_INTERFACE
 WantedBy=multi-user.target
 EOF
   systemctl daemon-reload
-  systemctl enable --now awg-exit.service awg-exit-routing.service
+  systemctl enable awg-exit.service awg-exit-routing.service
+  systemctl restart awg-exit.service awg-exit-routing.service
   printf '%s\n' "$remote_public_key"
   rm -f -- "$environment_file"
   trap - EXIT

@@ -97,6 +97,13 @@ def test_remote_configuration_cleanup_does_not_defer_a_local_variable():
     assert "trap - EXIT" in script
 
 
+def test_remote_reconfiguration_restarts_active_oneshot_services():
+    """A retry must apply newly generated peer keys to the live interface."""
+    script = Path("gateway/deploy/remote-exit.sh").read_text(encoding="utf-8")
+    assert "systemctl enable awg-exit.service awg-exit-routing.service" in script
+    assert "systemctl restart awg-exit.service awg-exit-routing.service" in script
+
+
 def test_operations_doc_uses_a_password_placeholder_only():
     text = Path("docs/panel-vps-operations.md").read_text(encoding="utf-8")
     assert "<ПАРОЛЬ_НОВОГО_VPS>" in text
