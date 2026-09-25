@@ -92,3 +92,66 @@ def test_cancel_and_delete_mutate_only_the_selected_record(tmp_path):
     repo.delete(first.id)
     assert repo.get(first.id) is None
     assert [record.id for record in repo.list()] == [second.id]
+
+
+def test_rename_preserves_ready_exit_network_identity(tmp_path):
+    repo = ExitRepository(tmp_path / "exits.sqlite3")
+    record = repo.create("old-name", IPv4Address("203.0.113.2"))
+    ready = repo.set_stage(record.id, ExitStatus.READY, "ready")
+
+    renamed = repo.rename(record.id, "new-name")
+
+    assert renamed.name == "new-name"
+    assert renamed.address == ready.address
+    assert renamed.status is ExitStatus.READY
+    assert renamed.slot == ready.slot
+    assert renamed.interface == ready.interface
+
+
+def test_prepare_replacement_reuses_slot_for_the_new_server(tmp_path):
+    repo = ExitRepository(tmp_path / "exits.sqlite3")
+    record = repo.create("old-vps", IPv4Address("203.0.113.2"))
+    ready = repo.set_stage(record.id, ExitStatus.READY, "ready")
+
+    replacement = repo.prepare_replacement(
+        record.id,
+        "new-vps",
+        IPv4Address("203.0.113.9"),
+    )
+
+    assert replacement.name == "new-vps"
+    assert replacement.address == "203.0.113.9"
+    assert replacement.status is ExitStatus.INSTALLING
+    assert replacement.stage == "queued"
+    assert replacement.slot == ready.slot
+    assert replacement.interface == ready.interface
+
+
+def test_rename_rejects_an_exit_with_an_active_operation(tmp_path):
+    repo = ExitRepository(tmp_path / "exits.sqlite3")
+    record = repo.create("installing", IPv4Address("203.0.113.2"))
+
+    with pytest.raises(ValueError, match="Редактировать можно"):
+        repo.rename(record.id, "changed")
+
+    assert repo.get(record.id).name == "installing"
+
+
+def test_restore_conflict_becomes_an_explicit_retryable_error(tmp_path):
+    repo = ExitRepository(tmp_path / "exits.sqlite3")
+    original = repo.create("old-vps", IPv4Address("203.0.113.2"))
+    original = repo.set_stage(original.id, ExitStatus.READY, "ready")
+    repo.prepare_replacement(
+        original.id,
+        "new-vps",
+        IPv4Address("203.0.113.9"),
+    )
+    repo.create("old-vps", IPv4Address("203.0.113.2"))
+
+    recovered = repo.restore_replacement(original)
+
+    assert recovered.status is ExitStatus.ERROR
+    assert recovered.stage == "restore_conflict"
+    assert recovered.name == "new-vps"
+    assert recovered.address == "203.0.113.9"
+    assert "старые данные" in recovered.error

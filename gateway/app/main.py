@@ -51,6 +51,9 @@ STATUS_LABELS = {
 
 STAGE_LABELS = {
     "queued": "Ожидание запуска",
+    "replace_remove_balance": "Исключение старого VPS из балансировки",
+    "local_cleanup": "Отключение старого локального туннеля",
+    "restore_conflict": "Требуется повторная настройка VPS",
     "ssh": "Подключение по SSH",
     "os_check": "Проверка Debian 12/13",
     "packages": "Установка пакетов",
@@ -284,6 +287,53 @@ def create_app(
         if record.status is not ExitStatus.ERROR:
             raise HTTPException(409, "only a failed exit can be retried")
         jobs.retry(exit_id, SecretStr(password))
+        return RedirectResponse("/exits", status_code=303)
+
+    @app.post("/exits/{exit_id}/edit")
+    def edit_exit(
+        exit_id: str,
+        action: str = Form(...),
+        name: str = Form(""),
+        address: str = Form(""),
+        password: str = Form(""),
+    ) -> RedirectResponse:
+        if action == "cancel":
+            return RedirectResponse("/exits", status_code=303)
+        if action != "save":
+            raise HTTPException(422, "unsupported exit edit action")
+        jobs = jobs_holder["jobs"]
+        if jobs is None:
+            raise HTTPException(503, "exit jobs are not configured")
+        record = jobs.repository.get(exit_id)
+        if record is None:
+            raise HTTPException(404, "exit not found")
+        try:
+            safe_name = validate_name(name)
+            host = IPv4Address(address)
+        except ValueError:
+            message = "Проверьте название и IP-адрес."
+            return RedirectResponse(
+                f"/exits?{urlencode({'error': message})}",
+                status_code=303,
+            )
+        if str(host) != record.address and not password:
+            message = "Для замены IP нужен пароль root нового VPS."
+            return RedirectResponse(
+                f"/exits?{urlencode({'error': message})}",
+                status_code=303,
+            )
+        try:
+            jobs.update(
+                exit_id,
+                safe_name,
+                host,
+                SecretStr(password) if password else None,
+            )
+        except (DuplicateExitError, ValueError) as exc:
+            return RedirectResponse(
+                f"/exits?{urlencode({'error': str(exc)})}",
+                status_code=303,
+            )
         return RedirectResponse("/exits", status_code=303)
 
     @app.post("/exits/{exit_id}/delete", response_class=HTMLResponse)

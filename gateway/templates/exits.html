@@ -3,8 +3,8 @@
 {% block content %}
 <h1>Выходные VPS</h1>
 {% if form_error %}<p class="error-text">{{ form_error }}</p>{% endif %}
-<section class="card">
-  <h2>Добавить выходной VPS</h2>
+<details class="card create-exit">
+  <summary>Добавить выходной VPS</summary>
   <form method="post" action="/exits/new">
     <label>Название<input name="name" required maxlength="63" autocomplete="off"></label>
     <label>IP-адрес<input name="address" required inputmode="decimal" autocomplete="off"></label>
@@ -15,7 +15,7 @@
       <button class="secondary" type="submit" name="action" value="cancel">Отмена</button>
     </div>
   </form>
-</section>
+</details>
 <section class="card">
   <h2>Подключённые VPS</h2>
   <ul class="exit-list">
@@ -28,8 +28,22 @@
         {% if node.error %}<span class="error-text">{{ node.error }}</span>{% endif %}
         {% if node.warning %}<span class="warning-text">{{ node.warning }}</span>{% endif %}
       </div>
-      <span class="client-actions">
+      <div class="client-actions">
         <span class="badge badge-{{ node.status }}">{{ node.status_label }}</span>
+        {% if node.status not in ["installing", "deleting"] %}
+        <details class="exit-editor">
+          <summary class="secondary">Редактировать</summary>
+          <form class="edit-exit-form" method="post" action="/exits/{{ node.id }}/edit">
+            <label>Название<input name="name" value="{{ node.name }}" required maxlength="63" autocomplete="off"></label>
+            <label>IP-адрес<input name="address" value="{{ node.address }}" required inputmode="decimal" autocomplete="off"></label>
+            <label>Пароль нового VPS<input name="password" type="password" autocomplete="new-password" placeholder="Нужен только при смене IP"></label>
+            <div class="actions">
+              <button type="submit" name="action" value="save">Сохранить</button>
+              <button class="secondary" type="submit" name="action" value="cancel">Отмена</button>
+            </div>
+          </form>
+        </details>
+        {% endif %}
         {% if node.status == "installing" %}
         <form class="inline-form" method="post" action="/exits/{{ node.id }}/cancel">
           <button class="secondary" type="submit">Остановить установку</button>
@@ -50,7 +64,7 @@
           <button class="danger" type="submit">Удалить VPS</button>
         </form>
         {% endif %}
-      </span>
+      </div>
     </li>
     {% else %}<li class="muted">Выходные VPS пока не добавлены.</li>{% endfor %}
   </ul>

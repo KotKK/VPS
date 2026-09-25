@@ -237,6 +237,128 @@ class ExitRepository:
         assert record is not None
         return record
 
+    def rename(self, exit_id: str, name: str) -> ExitRecord:
+        now = datetime.now(UTC).isoformat()
+        try:
+            with self._connect() as connection:
+                cursor = connection.execute(
+                    """
+                    UPDATE exits SET name = ?, updated_at = ?
+                    WHERE id = ? AND status IN (?, ?)
+                    """,
+                    (
+                        name,
+                        now,
+                        exit_id,
+                        ExitStatus.READY.value,
+                        ExitStatus.ERROR.value,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise ValueError(
+                        "Редактировать можно только доступный VPS или VPS с ошибкой"
+                    )
+        except sqlite3.IntegrityError as exc:
+            raise DuplicateExitError(
+                "VPS с таким названием или IP уже существует"
+            ) from exc
+        record = self.get(exit_id)
+        assert record is not None
+        return record
+
+    def prepare_replacement(
+        self,
+        exit_id: str,
+        name: str,
+        address: IPv4Address,
+    ) -> ExitRecord:
+        now = datetime.now(UTC).isoformat()
+        try:
+            with self._connect() as connection:
+                cursor = connection.execute(
+                    """
+                    UPDATE exits
+                    SET name = ?, address = ?, status = ?, stage = 'queued',
+                        error = '', warning = '', cancel_requested = 0,
+                        updated_at = ?
+                    WHERE id = ? AND status IN (?, ?)
+                    """,
+                    (
+                        name,
+                        str(address),
+                        ExitStatus.INSTALLING.value,
+                        now,
+                        exit_id,
+                        ExitStatus.READY.value,
+                        ExitStatus.ERROR.value,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise ValueError(
+                        "Редактировать можно только доступный VPS или VPS с ошибкой"
+                    )
+        except sqlite3.IntegrityError as exc:
+            raise DuplicateExitError(
+                "VPS с таким названием или IP уже существует"
+            ) from exc
+        record = self.get(exit_id)
+        assert record is not None
+        return record
+
+    def restore_replacement(
+        self,
+        original: ExitRecord,
+        error: str | None = None,
+    ) -> ExitRecord:
+        now = datetime.now(UTC).isoformat()
+        try:
+            with self._connect() as connection:
+                cursor = connection.execute(
+                    """
+                    UPDATE exits
+                    SET name = ?, address = ?, status = ?, stage = ?, error = ?,
+                        warning = ?, cancel_requested = ?, updated_at = ?
+                    WHERE id = ? AND status = ?
+                    """,
+                    (
+                        original.name,
+                        original.address,
+                        original.status.value,
+                        original.stage,
+                        original.error if error is None else error,
+                        original.warning,
+                        int(original.cancel_requested),
+                        now,
+                        original.id,
+                        ExitStatus.INSTALLING.value,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise ValueError("Замена VPS уже завершена или была остановлена")
+        except sqlite3.IntegrityError:
+            with self._connect() as connection:
+                cursor = connection.execute(
+                    """
+                    UPDATE exits
+                    SET status = ?, stage = 'restore_conflict',
+                        error = ?, warning = '', cancel_requested = 0,
+                        updated_at = ?
+                    WHERE id = ? AND status = ?
+                    """,
+                    (
+                        ExitStatus.ERROR.value,
+                        "Не удалось вернуть старые данные VPS: имя или IP уже заняты",
+                        now,
+                        original.id,
+                        ExitStatus.INSTALLING.value,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise ValueError("Замена VPS уже завершена или была остановлена")
+        record = self.get(original.id)
+        assert record is not None
+        return record
+
     def cancel_requested(self, exit_id: str) -> bool:
         with self._connect() as connection:
             row = connection.execute(

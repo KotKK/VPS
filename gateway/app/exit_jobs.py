@@ -7,7 +7,7 @@ import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from ipaddress import IPv4Address
-from typing import Protocol
+from typing import Callable, Protocol
 
 from pydantic import SecretStr
 
@@ -90,11 +90,15 @@ class ExitJobCoordinator:
     def active_state(self) -> GatewayState:
         return self._active_state
 
-    def _ready_state(self, extra: ExitRecord | None = None) -> GatewayState:
+    def _ready_state(
+        self,
+        extra: ExitRecord | None = None,
+        exclude_id: str | None = None,
+    ) -> GatewayState:
         records = [
             record
             for record in self.repository.list()
-            if record.status is ExitStatus.READY
+            if record.status is ExitStatus.READY and record.id != exclude_id
         ]
         if extra is not None and all(record.id != extra.id for record in records):
             records.append(extra)
@@ -113,12 +117,23 @@ class ExitJobCoordinator:
         )
 
     def _submit(self, record: ExitRecord, credentials: SSHCredentials) -> None:
+        self._submit_task(record, credentials, self._install, record.id)
+
+    def _submit_task(
+        self,
+        record: ExitRecord,
+        credentials: SSHCredentials,
+        function: Callable[..., None],
+        *args,
+    ) -> None:
         with self._lock:
             self._credentials[record.id] = credentials
-            self._futures[record.id] = self._executor.submit(
-                self._install,
-                record.id,
-            )
+            try:
+                future = self._executor.submit(function, *args)
+            except Exception:
+                self._credentials.pop(record.id, None)
+                raise
+            self._futures[record.id] = future
 
     def start(self, request: ExitCreate) -> ExitRecord:
         record = self.repository.create(request.name, request.host)
@@ -131,14 +146,62 @@ class ExitJobCoordinator:
         return record
 
     def retry(self, exit_id: str, password: SecretStr) -> ExitRecord:
+        previous = self.repository.get(exit_id)
+        if previous is None:
+            raise KeyError(exit_id)
         record = self.repository.prepare_retry(exit_id)
         credentials = SSHCredentials(
             host=IPv4Address(record.address),
             username="root",
             password=password,
         )
-        self._submit(record, credentials)
+        if previous.stage in {"local_cleanup", "restore_conflict"}:
+            self._submit_task(
+                record,
+                credentials,
+                self._retry_after_replacement_failure,
+                record.id,
+            )
+        else:
+            self._submit(record, credentials)
         return record
+
+    def update(
+        self,
+        exit_id: str,
+        name: str,
+        address: IPv4Address,
+        password: SecretStr | None,
+    ) -> ExitRecord:
+        record = self.repository.get(exit_id)
+        if record is None:
+            raise KeyError(exit_id)
+        if record.status not in {ExitStatus.READY, ExitStatus.ERROR}:
+            raise ValueError(
+                "Редактировать можно только доступный VPS или VPS с ошибкой"
+            )
+        if str(address) == record.address:
+            return self.repository.rename(exit_id, name)
+        if password is None or not password.get_secret_value():
+            raise ValueError("Для замены IP нужен пароль root нового VPS")
+        replacement = self.repository.prepare_replacement(
+            exit_id,
+            name,
+            address,
+        )
+        credentials = SSHCredentials(address, "root", password)
+        try:
+            self._submit_task(
+                replacement,
+                credentials,
+                self._replace,
+                record,
+                replacement.id,
+            )
+        except Exception:
+            self.repository.restore_replacement(record)
+            raise
+        return replacement
 
     def cancel(self, exit_id: str) -> None:
         self.repository.request_cancel(exit_id)
@@ -208,7 +271,7 @@ class ExitJobCoordinator:
             self._active_state = desired
             self.repository.set_stage(exit_id, ExitStatus.READY, "ready")
         except ProvisionCancelled:
-            self.provisioner.cleanup_local(record)
+            self._cleanup_local_safely(record, "cancelled provisioning")
             self.repository.set_stage(
                 exit_id,
                 ExitStatus.ERROR,
@@ -221,7 +284,7 @@ class ExitJobCoordinator:
                 exit_id,
                 last_stage,
             )
-            self.provisioner.cleanup_local(record)
+            self._cleanup_local_safely(record, "failed provisioning")
             self.repository.set_stage(
                 exit_id,
                 ExitStatus.ERROR,
@@ -231,6 +294,94 @@ class ExitJobCoordinator:
         finally:
             with self._lock:
                 self._credentials.pop(exit_id, None)
+
+    def _cleanup_local_safely(self, record: ExitRecord, context: str) -> bool:
+        try:
+            self.provisioner.cleanup_local(record)
+        except Exception:
+            LOGGER.exception("Local cleanup failed during %s for %s", context, record.id)
+            return False
+        return True
+
+    def _retry_after_replacement_failure(self, exit_id: str) -> None:
+        delegated_to_install = False
+        try:
+            record = self.repository.get(exit_id)
+            if record is None:
+                return
+            if any(route.name == exit_id for route in self._active_state.exits):
+                desired = self._ready_state(exclude_id=exit_id)
+                result = self.applier.apply(self._active_state, desired)
+                if result.active != desired:
+                    self.repository.set_stage(
+                        exit_id,
+                        ExitStatus.ERROR,
+                        "restore_conflict",
+                        "Не удалось исключить старый VPS из балансировки",
+                    )
+                    return
+                self._active_state = desired
+            if not self._cleanup_local_safely(record, "replacement retry"):
+                self.repository.set_stage(
+                    exit_id,
+                    ExitStatus.ERROR,
+                    "local_cleanup",
+                    "Не удалось отключить старый локальный туннель",
+                )
+                return
+            delegated_to_install = True
+            self._install(exit_id)
+        finally:
+            if not delegated_to_install:
+                with self._lock:
+                    self._credentials.pop(exit_id, None)
+
+    def _replace(self, original: ExitRecord, exit_id: str) -> None:
+        delegated_to_install = False
+        try:
+            if self.repository.cancel_requested(exit_id):
+                self.repository.restore_replacement(original)
+                return
+
+            desired = self._ready_state(exclude_id=exit_id)
+            if original.status is ExitStatus.READY:
+                self.repository.set_stage(
+                    exit_id,
+                    ExitStatus.INSTALLING,
+                    "replace_remove_balance",
+                )
+                result = self.applier.apply(self._active_state, desired)
+                if result.active != desired:
+                    self.repository.restore_replacement(
+                        original,
+                        "Не удалось временно исключить VPS из балансировки",
+                    )
+                    return
+                self._active_state = desired
+
+            self.repository.set_stage(
+                exit_id,
+                ExitStatus.INSTALLING,
+                "local_cleanup",
+            )
+            try:
+                self.provisioner.cleanup_local(original)
+            except Exception:
+                LOGGER.exception("Local cleanup failed while replacing %s", exit_id)
+                self.repository.set_stage(
+                    exit_id,
+                    ExitStatus.ERROR,
+                    "local_cleanup",
+                    "Не удалось отключить старый локальный туннель",
+                )
+                return
+
+            delegated_to_install = True
+            self._install(exit_id)
+        finally:
+            if not delegated_to_install:
+                with self._lock:
+                    self._credentials.pop(exit_id, None)
 
     def _delete(self, record: ExitRecord, discard_warning: bool) -> None:
         with self._lock:

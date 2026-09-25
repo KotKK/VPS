@@ -25,6 +25,7 @@ class FakeExitJobs:
         self.cancelled = []
         self.deleted = []
         self.retried = []
+        self.updated = []
 
     def start(self, request):
         self.started.append(request)
@@ -47,6 +48,13 @@ class FakeExitJobs:
     def delete(self, exit_id, password, acknowledge):
         self.deleted.append((exit_id, password, acknowledge))
         return self.repository.get(exit_id)
+
+    def update(self, exit_id, name, address, password):
+        self.updated.append((exit_id, name, address, password))
+        record = self.repository.get(exit_id)
+        if str(address) == record.address:
+            return self.repository.rename(exit_id, name)
+        return self.repository.prepare_replacement(exit_id, name, address)
 
 
 def test_create_exit_calls_provisioner_before_it_appears_in_panel():
@@ -114,6 +122,89 @@ def test_exits_page_exposes_a_confirmed_delete_button():
     page = client.get("/exits").text
     assert 'action="/exits/exit-a/delete"' in page
     assert "Удалить VPS" in page
+
+
+def test_exits_page_has_collapsible_create_and_edit_forms(tmp_path):
+    repository = ExitRepository(tmp_path / "exits.sqlite3")
+    record = repository.create("Germany", IPv4Address("203.0.113.2"))
+    repository.set_stage(record.id, ExitStatus.READY, "ready")
+    client = TestClient(create_app(StateStore(), exit_jobs=FakeExitJobs(repository)))
+
+    page = client.get("/exits").text
+
+    assert '<details class="card create-exit">' in page
+    assert '<summary>Добавить выходной VPS</summary>' in page
+    assert f'action="/exits/{record.id}/edit"' in page
+    assert 'value="Germany"' in page
+    assert 'value="203.0.113.2"' in page
+    assert "Редактировать" in page
+    assert 'name="action" value="cancel"' in page
+
+
+def test_edit_exit_sends_validated_values_to_the_job_coordinator(tmp_path):
+    repository = ExitRepository(tmp_path / "exits.sqlite3")
+    record = repository.create("Germany", IPv4Address("203.0.113.2"))
+    repository.set_stage(record.id, ExitStatus.READY, "ready")
+    jobs = FakeExitJobs(repository)
+    client = TestClient(create_app(StateStore(), exit_jobs=jobs))
+
+    response = client.post(
+        f"/exits/{record.id}/edit",
+        data={
+            "action": "save",
+            "name": "Finland",
+            "address": "203.0.113.9",
+            "password": "new-secret",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/exits"
+    exit_id, name, address, password = jobs.updated[0]
+    assert exit_id == record.id
+    assert name == "Finland"
+    assert address == IPv4Address("203.0.113.9")
+    assert password.get_secret_value() == "new-secret"
+
+
+def test_edit_exit_cancel_makes_no_changes(tmp_path):
+    repository = ExitRepository(tmp_path / "exits.sqlite3")
+    record = repository.create("Germany", IPv4Address("203.0.113.2"))
+    jobs = FakeExitJobs(repository)
+    client = TestClient(create_app(StateStore(), exit_jobs=jobs))
+
+    response = client.post(
+        f"/exits/{record.id}/edit",
+        data={"action": "cancel"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert jobs.updated == []
+
+
+def test_edit_exit_requires_new_root_password_when_ip_changes(tmp_path):
+    repository = ExitRepository(tmp_path / "exits.sqlite3")
+    record = repository.create("Germany", IPv4Address("203.0.113.2"))
+    repository.set_stage(record.id, ExitStatus.READY, "ready")
+    jobs = FakeExitJobs(repository)
+    client = TestClient(create_app(StateStore(), exit_jobs=jobs))
+
+    response = client.post(
+        f"/exits/{record.id}/edit",
+        data={
+            "action": "save",
+            "name": "Finland",
+            "address": "203.0.113.9",
+            "password": "",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert "error=" in response.headers["location"]
+    assert jobs.updated == []
 
 
 def test_create_exit_redirects_immediately_and_shows_installing_stage(tmp_path):
