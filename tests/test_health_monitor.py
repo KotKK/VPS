@@ -118,6 +118,36 @@ def test_two_processes_cannot_deliver_the_same_outbox_message_twice(tmp_path):
     assert first.outbox.pending() == []
 
 
+def test_slow_telegram_delivery_does_not_block_new_alerts_from_being_queued(tmp_path):
+    database = tmp_path / "notifications.sqlite3"
+    sender = BlockingSender()
+    notifications = NotificationService(NotificationOutbox(database), sender)
+    notifications.outbox.enqueue("Первый алерт")
+    delivery = threading.Thread(
+        target=notifications.flush,
+        args=(("awg-uplink",),),
+    )
+    delivery.start()
+    assert sender.entered.wait(timeout=1)
+
+    queued = threading.Event()
+
+    def enqueue_second():
+        NotificationOutbox(database).enqueue("Второй алерт")
+        queued.set()
+
+    enqueue = threading.Thread(target=enqueue_second)
+    enqueue.start()
+    queued_without_waiting_for_telegram = queued.wait(timeout=0.5)
+    sender.release.set()
+    delivery.join(timeout=2)
+    enqueue.join(timeout=2)
+
+    assert queued_without_waiting_for_telegram
+    assert sender.calls == 2
+    assert notifications.outbox.pending() == []
+
+
 def test_monitor_checks_every_ready_vps_and_alerts_only_on_state_changes(tmp_path):
     exits = ExitRepository(tmp_path / "exits.sqlite3")
     first = ready_exit(exits, "Stockholm", "203.0.113.2")

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import subprocess
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -43,10 +44,20 @@ class NotificationOutbox:
                 CREATE TABLE IF NOT EXISTS notifications (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     text TEXT NOT NULL,
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    claimed_until REAL NOT NULL DEFAULT 0
                 )
                 """
             )
+            columns = {
+                str(row[1])
+                for row in connection.execute("PRAGMA table_info(notifications)")
+            }
+            if "claimed_until" not in columns:
+                connection.execute(
+                    "ALTER TABLE notifications "
+                    "ADD COLUMN claimed_until REAL NOT NULL DEFAULT 0"
+                )
 
     def enqueue(self, text: str) -> None:
         with sqlite3.connect(self.database, timeout=30) as connection:
@@ -68,23 +79,29 @@ class NotificationOutbox:
                 "DELETE FROM notifications WHERE id = ?", (notification_id,)
             )
 
-    def deliver(
-        self,
-        sender: "NotificationSender",
-        interfaces: Sequence[str],
-    ) -> None:
-        """Serialize delivery across the panel and timer processes."""
+    def claim(self, lease_seconds: int) -> PendingNotification | None:
+        """Atomically lease the oldest message without holding a network lock."""
+        now = time.time()
         with sqlite3.connect(self.database, timeout=30) as connection:
             connection.execute("BEGIN IMMEDIATE")
-            rows = connection.execute(
-                "SELECT id, text FROM notifications ORDER BY id"
-            ).fetchall()
-            for notification_id, text in rows:
-                if not sender.send(str(text), interfaces):
-                    return
-                connection.execute(
-                    "DELETE FROM notifications WHERE id = ?", (notification_id,)
-                )
+            row = connection.execute(
+                "SELECT id, text, claimed_until FROM notifications "
+                "ORDER BY id LIMIT 1"
+            ).fetchone()
+            if row is None or float(row[2]) > now:
+                return None
+            connection.execute(
+                "UPDATE notifications SET claimed_until = ? WHERE id = ?",
+                (now + lease_seconds, int(row[0])),
+            )
+        return PendingNotification(int(row[0]), str(row[1]))
+
+    def release(self, notification_id: int) -> None:
+        with sqlite3.connect(self.database, timeout=30) as connection:
+            connection.execute(
+                "UPDATE notifications SET claimed_until = 0 WHERE id = ?",
+                (notification_id,),
+            )
 
 
 class NotificationSender(Protocol):
@@ -159,7 +176,16 @@ class NotificationService:
     def flush(self, interfaces: Sequence[str]) -> None:
         if not interfaces:
             return
-        self.outbox.deliver(self.sender, interfaces)
+        lease_seconds = 60 + (30 * len(interfaces))
+        while notification := self.outbox.claim(lease_seconds):
+            try:
+                if not self.sender.send(notification.text, interfaces):
+                    self.outbox.release(notification.id)
+                    return
+            except Exception:
+                self.outbox.release(notification.id)
+                raise
+            self.outbox.delete(notification.id)
 
 
 def production_notification_service(state_dir: Path) -> NotificationService:
