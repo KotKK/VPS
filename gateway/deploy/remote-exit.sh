@@ -81,11 +81,32 @@ install_debian_12_packages() {
   trap - EXIT
 }
 
+install_running_kernel_headers() {
+  local kernel_headers
+  kernel_headers="linux-headers-$(uname -r)"
+  if ! apt-cache show "$kernel_headers" >/dev/null 2>&1; then
+    [[ $VERSION_ID == 13 ]] || {
+      echo "Kernel headers are unavailable: $kernel_headers" >&2
+      exit 69
+    }
+    cat >/etc/apt/sources.list.d/awg-gateway-debian-security.sources <<'EOF'
+Types: deb
+URIs: https://security.debian.org/debian-security
+Suites: trixie-security
+Components: main
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+EOF
+    apt-get update
+  fi
+  apt-get install -y "$kernel_headers"
+}
+
 install_packages() {
   require_supported_debian
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
-  apt-get install -y ca-certificates curl gnupg "linux-headers-$(uname -r)" nftables iproute2
+  apt-get install -y ca-certificates curl gnupg nftables iproute2
+  install_running_kernel_headers
 
   case "$VERSION_ID" in
     12) install_debian_12_packages ;;

@@ -93,6 +93,17 @@ def test_debian_12_remote_install_is_pinned_to_verified_official_sources():
     assert "dkms install -m amneziawg -v 1.0.0" in script
 
 
+def test_debian_13_missing_running_kernel_headers_enables_official_security_repo():
+    script = Path("gateway/deploy/remote-exit.sh").read_text(encoding="utf-8")
+
+    assert 'kernel_headers="linux-headers-$(uname -r)"' in script
+    assert 'apt-cache show "$kernel_headers"' in script
+    assert "URIs: https://security.debian.org/debian-security" in script
+    assert "Suites: trixie-security" in script
+    assert "Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg" in script
+    assert script.count('apt-get install -y "$kernel_headers"') == 1
+
+
 def test_remote_configuration_cleanup_does_not_defer_a_local_variable():
     script = Path("gateway/deploy/remote-exit.sh").read_text(encoding="utf-8")
     assert "trap 'rm -f \"$environment_file\"' EXIT" not in script
