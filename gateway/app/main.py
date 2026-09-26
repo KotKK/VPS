@@ -58,6 +58,7 @@ STAGE_LABELS = {
     "ssh": "Подключение по SSH",
     "os_check": "Проверка Debian 12/13",
     "packages": "Установка пакетов",
+    "reboot": "Перезагрузка VPS после обновления ядра",
     "remote_tunnel": "Настройка зарубежного туннеля",
     "local_tunnel": "Настройка российского шлюза",
     "handshake": "Проверка handshake",

@@ -10,6 +10,7 @@ TOOLS_REPOSITORY=https://github.com/amnezia-vpn/amneziawg-tools.git
 TOOLS_TAG=v1.0.20260618-2
 TOOLS_COMMIT=61e741780e8465a67a7d7fb6cffe14a8a15d624a
 SOURCE_STAMP=/var/lib/awg-gateway/amneziawg-source-version
+DEBIAN_SECURITY_SOURCE=/etc/apt/sources.list.d/awg-gateway-debian-security.sources
 
 require_supported_debian() {
   # shellcheck disable=SC1091
@@ -81,22 +82,48 @@ install_debian_12_packages() {
   trap - EXIT
 }
 
-install_running_kernel_headers() {
-  local kernel_headers
-  kernel_headers="linux-headers-$(uname -r)"
-  if ! apt-cache show "$kernel_headers" >/dev/null 2>&1; then
-    [[ $VERSION_ID == 13 ]] || {
-      echo "Kernel headers are unavailable: $kernel_headers" >&2
-      exit 69
-    }
-    cat >/etc/apt/sources.list.d/awg-gateway-debian-security.sources <<'EOF'
+ensure_debian_13_security_repo() {
+  local active_releases
+  rm -f -- "$DEBIAN_SECURITY_SOURCE"
+  apt-get update
+  active_releases=$(apt-get indextargets --format '$(RELEASE)')
+  if grep -Fxq trixie-security <<<"$active_releases"; then
+    return
+  fi
+  cat >"$DEBIAN_SECURITY_SOURCE" <<'EOF'
 Types: deb
 URIs: https://security.debian.org/debian-security
 Suites: trixie-security
 Components: main
 Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
 EOF
-    apt-get update
+  apt-get update
+}
+
+install_running_kernel_headers() {
+  local kernel_headers kernel_image_meta kernel_headers_meta
+  kernel_headers="linux-headers-$(uname -r)"
+  if ! apt-cache show "$kernel_headers" >/dev/null 2>&1; then
+    [[ $VERSION_ID == 13 ]] || {
+      echo "Kernel headers are unavailable: $kernel_headers" >&2
+      exit 69
+    }
+  fi
+
+  if ! apt-cache show "$kernel_headers" >/dev/null 2>&1; then
+    case "$(uname -r)" in
+      *-cloud-amd64)
+        kernel_image_meta=linux-image-cloud-amd64
+        kernel_headers_meta=linux-headers-cloud-amd64
+        ;;
+      *)
+        kernel_image_meta=linux-image-amd64
+        kernel_headers_meta=linux-headers-amd64
+        ;;
+    esac
+    apt-get install -y "$kernel_image_meta" "$kernel_headers_meta"
+    echo "AWG_REBOOT_REQUIRED: installed a supported Debian kernel" >&2
+    exit 75
   fi
   apt-get install -y "$kernel_headers"
 }
@@ -104,7 +131,11 @@ EOF
 install_packages() {
   require_supported_debian
   export DEBIAN_FRONTEND=noninteractive
-  apt-get update
+  if [[ $VERSION_ID == 13 ]]; then
+    ensure_debian_13_security_repo
+  else
+    apt-get update
+  fi
   apt-get install -y ca-certificates curl gnupg nftables iproute2
   install_running_kernel_headers
 

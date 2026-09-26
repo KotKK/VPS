@@ -101,6 +101,11 @@ def test_debian_13_missing_running_kernel_headers_enables_official_security_repo
     assert "URIs: https://security.debian.org/debian-security" in script
     assert "Suites: trixie-security" in script
     assert "Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg" in script
+    assert "apt-get indextargets" in script
+    assert 'rm -f -- "$DEBIAN_SECURITY_SOURCE"' in script
+    assert "linux-image-amd64" in script
+    assert "linux-headers-amd64" in script
+    assert "AWG_REBOOT_REQUIRED" in script
     assert script.count('apt-get install -y "$kernel_headers"') == 1
 
 

@@ -7,17 +7,31 @@ from pydantic import SecretStr
 
 from gateway.app.exit_provisioner import (
     ExitProvisioner,
+    KernelModuleUnavailableError,
     ProvisionCancelled,
     UnsupportedRemoteOSError,
 )
 from gateway.app.exit_store import ExitRepository
 from gateway.app.keygen import AwgKeyPair
-from gateway.app.ssh_transport import SSHCommandError, SSHCredentials, SSHResult
+from gateway.app.ssh_transport import (
+    SSHCommandError,
+    SSHCredentials,
+    SSHResult,
+    SSHTransportError,
+)
 
 
 class FakeSession:
-    def __init__(self, os_release: str = 'ID=debian\nVERSION_ID="13"\n'):
+    def __init__(
+        self,
+        os_release: str = 'ID=debian\nVERSION_ID="13"\n',
+        *,
+        boot_id: str = "boot-current",
+        package_error: Exception | None = None,
+    ):
         self.os_release = os_release
+        self.boot_id = boot_id
+        self.package_error = package_error
         self.commands: list[list[str]] = []
         self.uploads: list[tuple[str, bytes, int]] = []
         self.configured = False
@@ -27,6 +41,10 @@ class FakeSession:
         self.commands.append(command)
         if command == ["cat", "/etc/os-release"]:
             return SSHResult(self.os_release, "", 0)
+        if command == ["cat", "/proc/sys/kernel/random/boot_id"]:
+            return SSHResult(f"{self.boot_id}\n", "", 0)
+        if "packages" in command and self.package_error is not None:
+            raise self.package_error
         if "configure" in command:
             self.configured = True
             return SSHResult("remote-public\n", "", 0)
@@ -43,6 +61,20 @@ class FakeTransport:
     @contextmanager
     def connect(self, _credentials):
         yield self.session
+
+
+class SequencedTransport:
+    def __init__(self, attempts):
+        self.attempts = list(attempts)
+        self.connect_count = 0
+
+    @contextmanager
+    def connect(self, _credentials):
+        self.connect_count += 1
+        attempt = self.attempts.pop(0)
+        if isinstance(attempt, Exception):
+            raise attempt
+        yield attempt
 
 
 class FakeLocalManager:
@@ -148,6 +180,102 @@ def test_provisioner_explains_when_host_kernel_cannot_load_module(tmp_path):
     with pytest.raises(RuntimeError, match="ядро VPS не может загрузить"):
         provisioner.provision(
             build_record(tmp_path), credentials(), lambda _stage: None, lambda: False
+        )
+
+
+def test_provisioner_reboots_outdated_debian_kernel_and_resumes(tmp_path):
+    reboot_required = SSHCommandError(
+        "Ошибка удалённой команды: AWG_REBOOT_REQUIRED"
+    )
+    before_reboot = FakeSession(boot_id="boot-old", package_error=reboot_required)
+    after_reboot_probe = FakeSession(boot_id="boot-new")
+    resumed = FakeSession(boot_id="boot-new")
+    transport = SequencedTransport(
+        [
+            before_reboot,
+            SSHTransportError("VPS перезагружается"),
+            after_reboot_probe,
+            resumed,
+        ]
+    )
+    local = FakeLocalManager()
+    record = build_record(tmp_path)
+    stages: list[str] = []
+    provisioner = ExitProvisioner(
+        transport,
+        local,
+        Path("gateway/deploy/remote-exit.sh"),
+        reboot_timeout=1,
+        sleeper=lambda _seconds: None,
+    )
+
+    provisioner.provision(record, credentials(), stages.append, lambda: False)
+
+    assert ["systemctl", "reboot"] in before_reboot.commands
+    assert stages.count("reboot") == 1
+    assert local.started == [record.id]
+    assert resumed.configured is True
+    assert transport.connect_count == 4
+
+
+def test_provisioner_stops_if_kernel_is_still_outdated_after_reboot(tmp_path):
+    reboot_required = SSHCommandError(
+        "Ошибка удалённой команды: AWG_REBOOT_REQUIRED"
+    )
+    before_reboot = FakeSession(boot_id="boot-old", package_error=reboot_required)
+    after_reboot_probe = FakeSession(boot_id="boot-new")
+    still_outdated = FakeSession(boot_id="boot-new", package_error=reboot_required)
+    transport = SequencedTransport([before_reboot, after_reboot_probe, still_outdated])
+    provisioner = ExitProvisioner(
+        transport,
+        FakeLocalManager(),
+        Path("gateway/deploy/remote-exit.sh"),
+        reboot_timeout=1,
+        sleeper=lambda _seconds: None,
+    )
+
+    with pytest.raises(KernelModuleUnavailableError, match="после перезагрузки"):
+        provisioner.provision(
+            build_record(tmp_path),
+            credentials(),
+            lambda _stage: None,
+            lambda: False,
+        )
+
+    assert before_reboot.commands.count(["systemctl", "reboot"]) == 1
+    assert ["systemctl", "reboot"] not in still_outdated.commands
+
+
+def test_provisioner_reports_reboot_command_failure_without_polling(tmp_path):
+    class RebootCommandFailureSession(FakeSession):
+        def run(self, args, stdin=None):
+            if list(args) == ["systemctl", "reboot"]:
+                raise SSHCommandError(
+                    "Ошибка удалённой команды: systemctl reboot failed"
+                )
+            return super().run(args, stdin)
+
+    session = RebootCommandFailureSession(
+        boot_id="boot-old",
+        package_error=SSHCommandError(
+            "Ошибка удалённой команды: AWG_REBOOT_REQUIRED"
+        ),
+    )
+    transport = FakeTransport(session)
+    provisioner = ExitProvisioner(
+        transport,
+        FakeLocalManager(),
+        Path("gateway/deploy/remote-exit.sh"),
+        reboot_timeout=0,
+        sleeper=lambda _seconds: None,
+    )
+
+    with pytest.raises(SSHCommandError, match="systemctl reboot failed"):
+        provisioner.provision(
+            build_record(tmp_path),
+            credentials(),
+            lambda _stage: None,
+            lambda: False,
         )
 
 

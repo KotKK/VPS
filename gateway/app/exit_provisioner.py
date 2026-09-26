@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import shlex
+import time
 from pathlib import Path
 from typing import Callable, Protocol
 
 from gateway.app.exit_network import LocalUplinkManager, TunnelAllocation
 from gateway.app.exit_store import ExitRecord
 from gateway.app.ssh_transport import (
+    HostKeyChangedError,
+    SSHAuthenticationError,
     SSHCommandError,
     SSHCredentials,
+    SSHTimeoutError,
     SSHTransport,
     SSHTransportError,
 )
@@ -53,10 +57,14 @@ class ExitProvisioner:
         transport: SSHTransport,
         local_manager: UplinkManager,
         remote_script: Path,
+        reboot_timeout: int = 240,
+        sleeper: Callable[[float], None] = time.sleep,
     ):
         self.transport = transport
         self.local_manager = local_manager
         self.remote_script = remote_script
+        self.reboot_timeout = reboot_timeout
+        self._sleep = sleeper
 
     @staticmethod
     def _check_cancel(cancelled: Callable[[], bool]) -> None:
@@ -78,6 +86,35 @@ class ExitProvisioner:
             f"{name}={shlex.quote(value)}\n" for name, value in values.items()
         ).encode()
 
+    @staticmethod
+    def _boot_id(session) -> str:
+        boot_id = session.run(
+            ["cat", "/proc/sys/kernel/random/boot_id"]
+        ).stdout.strip()
+        if not boot_id:
+            raise RuntimeError("VPS не вернул идентификатор загрузки")
+        return boot_id
+
+    def _wait_for_reboot(
+        self,
+        credentials: SSHCredentials,
+        previous_boot_id: str,
+        cancelled: Callable[[], bool],
+    ) -> None:
+        deadline = time.monotonic() + self.reboot_timeout
+        while time.monotonic() < deadline:
+            self._check_cancel(cancelled)
+            try:
+                with self.transport.connect(credentials) as session:
+                    if self._boot_id(session) != previous_boot_id:
+                        return
+            except (SSHAuthenticationError, HostKeyChangedError):
+                raise
+            except SSHTransportError:
+                pass
+            self._sleep(3)
+        raise SSHTimeoutError("VPS не вернулся после перезагрузки ядра")
+
     def provision(
         self,
         record: ExitRecord,
@@ -87,62 +124,95 @@ class ExitProvisioner:
     ) -> None:
         script_path = "/tmp/awg-gateway-remote-exit.sh"
         environment_path = "/tmp/awg-gateway-exit.env"
-        progress("ssh")
-        self._check_cancel(cancelled)
+        rebooted = False
         try:
-            with self.transport.connect(credentials) as session:
-                progress("os_check")
+            while True:
+                progress("ssh")
                 self._check_cancel(cancelled)
-                os_release = _parse_os_release(
-                    session.run(["cat", "/etc/os-release"]).stdout
-                )
-                if (
-                    os_release.get("ID") != "debian"
-                    or os_release.get("VERSION_ID") not in {"12", "13"}
-                ):
-                    raise UnsupportedRemoteOSError(
-                        "Поддерживаются только чистые Debian 12 и Debian 13"
+                reboot_boot_id = None
+                with self.transport.connect(credentials) as session:
+                    progress("os_check")
+                    self._check_cancel(cancelled)
+                    os_release = _parse_os_release(
+                        session.run(["cat", "/etc/os-release"]).stdout
                     )
+                    if (
+                        os_release.get("ID") != "debian"
+                        or os_release.get("VERSION_ID") not in {"12", "13"}
+                    ):
+                        raise UnsupportedRemoteOSError(
+                            "Поддерживаются только чистые Debian 12 и Debian 13"
+                        )
+                    boot_id = self._boot_id(session)
 
-                session.put_bytes(script_path, self.remote_script.read_bytes(), 0o700)
-                progress("packages")
-                self._check_cancel(cancelled)
-                try:
-                    session.run(["bash", script_path, "packages"])
-                except SSHCommandError as exc:
-                    if "AWG_KERNEL_MODULE_UNAVAILABLE" in str(exc):
-                        raise KernelModuleUnavailableError(
-                            "ядро VPS не может загрузить модуль AmneziaWG; "
-                            "для LXC модуль должен быть разрешён на хосте"
-                        ) from exc
-                    raise
+                    session.put_bytes(
+                        script_path, self.remote_script.read_bytes(), 0o700
+                    )
+                    progress("packages")
+                    self._check_cancel(cancelled)
+                    try:
+                        session.run(["bash", script_path, "packages"])
+                    except SSHCommandError as exc:
+                        detail = str(exc)
+                        if "AWG_REBOOT_REQUIRED" in detail:
+                            if rebooted:
+                                raise KernelModuleUnavailableError(
+                                    "после перезагрузки заголовки запущенного "
+                                    "ядра VPS всё ещё недоступны"
+                                ) from exc
+                            try:
+                                session.run(["systemctl", "reboot"])
+                            except SSHCommandError:
+                                raise
+                            except SSHTransportError:
+                                # A disconnect is the expected result of reboot.
+                                pass
+                            reboot_boot_id = boot_id
+                        elif "AWG_KERNEL_MODULE_UNAVAILABLE" in detail:
+                            raise KernelModuleUnavailableError(
+                                "ядро VPS не может загрузить модуль AmneziaWG; "
+                                "для LXC модуль должен быть разрешён на хосте"
+                            ) from exc
+                        else:
+                            raise
 
-                keys = self.local_manager.generate_keys()
-                progress("remote_tunnel")
-                self._check_cancel(cancelled)
-                session.put_bytes(
-                    environment_path,
-                    self._environment(record, keys.public_key),
-                    0o600,
-                )
-                remote_public_key = session.run(
-                    ["bash", script_path, "configure", environment_path]
-                ).stdout.strip()
-                if not remote_public_key:
-                    raise RuntimeError("Зарубежный VPS не вернул публичный ключ")
-                self._check_cancel(cancelled)
+                    if reboot_boot_id is None:
+                        keys = self.local_manager.generate_keys()
+                        progress("remote_tunnel")
+                        self._check_cancel(cancelled)
+                        session.put_bytes(
+                            environment_path,
+                            self._environment(record, keys.public_key),
+                            0o600,
+                        )
+                        remote_public_key = session.run(
+                            ["bash", script_path, "configure", environment_path]
+                        ).stdout.strip()
+                        if not remote_public_key:
+                            raise RuntimeError(
+                                "Зарубежный VPS не вернул публичный ключ"
+                            )
+                        self._check_cancel(cancelled)
 
-                progress("local_tunnel")
-                self.local_manager.stage(record, keys.private_key, remote_public_key)
-                self.local_manager.start(record)
-                self._check_cancel(cancelled)
+                        progress("local_tunnel")
+                        self.local_manager.stage(
+                            record, keys.private_key, remote_public_key
+                        )
+                        self.local_manager.start(record)
+                        self._check_cancel(cancelled)
 
-                progress("handshake")
-                self.local_manager.wait_handshake(record, 45)
-                self._check_cancel(cancelled)
+                        progress("handshake")
+                        self.local_manager.wait_handshake(record, 45)
+                        self._check_cancel(cancelled)
 
-                progress("internet_check")
-                self.local_manager.check_internet(record)
+                        progress("internet_check")
+                        self.local_manager.check_internet(record)
+                        return
+
+                assert reboot_boot_id is not None
+                progress("reboot")
+                self._wait_for_reboot(credentials, reboot_boot_id, cancelled)
+                rebooted = True
         except ProvisionCancelled:
             self.local_manager.remove(record)
             raise

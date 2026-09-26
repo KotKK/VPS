@@ -57,6 +57,20 @@ class FakeExitJobs:
         return self.repository.prepare_replacement(exit_id, name, address)
 
 
+def test_exit_panel_localizes_kernel_reboot_stage(tmp_path):
+    repository = ExitRepository(tmp_path / "exits.sqlite3")
+    record = repository.create("Stockholm", IPv4Address("203.0.113.2"))
+    repository.set_stage(record.id, ExitStatus.INSTALLING, "reboot")
+    client = TestClient(
+        create_app(StateStore(), exit_jobs=FakeExitJobs(repository))
+    )
+
+    response = client.get("/exits")
+
+    assert response.status_code == 200
+    assert "Перезагрузка VPS после обновления ядра" in response.text
+
+
 def test_create_exit_calls_provisioner_before_it_appears_in_panel():
     """An exit is listed only after its SSH provisioning succeeds."""
     calls: list[ExitCreate] = []
