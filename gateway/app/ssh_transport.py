@@ -177,7 +177,11 @@ class SSHTransport:
                 ) from exc
             except paramiko.AuthenticationException as exc:
                 raise SSHAuthenticationError("Неверный пароль root") from exc
-            except (TimeoutError, socket.timeout) as exc:
+            except (
+                TimeoutError,
+                socket.timeout,
+                paramiko.ssh_exception.NoValidConnectionsError,
+            ) as exc:
                 raise SSHTimeoutError("VPS не ответил по SSH вовремя") from exc
             except paramiko.SSHException as exc:
                 raise SSHTransportError("Не удалось установить SSH-соединение") from exc

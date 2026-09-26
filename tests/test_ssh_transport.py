@@ -10,6 +10,7 @@ from gateway.app.ssh_transport import (
     HostKeyChangedError,
     SSHCommandError,
     SSHCredentials,
+    SSHTimeoutError,
     SSHTransport,
     TrustOnFirstUsePolicy,
 )
@@ -107,6 +108,27 @@ def test_changed_host_key_is_mapped_before_any_command(tmp_path):
             pass
 
     assert fake.executed == []
+
+
+def test_refused_ssh_connection_is_mapped_to_retryable_transport_error(tmp_path):
+    class RefusedClient(FakeSSHClient):
+        def connect(self, **kwargs) -> None:
+            raise paramiko.ssh_exception.NoValidConnectionsError(
+                {
+                    (kwargs["hostname"], 22): ConnectionRefusedError(
+                        111, "Connection refused"
+                    )
+                }
+            )
+
+    fake = RefusedClient()
+    transport = SSHTransport(tmp_path / "known_hosts", client_factory=lambda: fake)
+
+    with pytest.raises(SSHTimeoutError, match="SSH"):
+        with transport.connect(credentials()):
+            pass
+
+    assert fake.closed is True
 
 
 def test_first_use_policy_persists_received_public_key(tmp_path):
