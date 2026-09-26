@@ -364,10 +364,12 @@ def test_cleanup_failure_leaves_replacement_retryable_and_forgets_password(tmp_p
     repository = ExitRepository(tmp_path / "state.sqlite3")
     record = repository.create("old-vps", IPv4Address("203.0.113.2"))
     repository.set_stage(record.id, ExitStatus.READY, "ready")
+    notifier = RecordingNotifier()
     coordinator = ExitJobCoordinator(
         repository,
         CleanupFailureProvisioner(),
         RecordingApplier(),
+        notifier=notifier,
     )
 
     coordinator.update(
@@ -382,6 +384,52 @@ def test_cleanup_failure_leaves_replacement_retryable_and_forgets_password(tmp_p
     assert failed.status is ExitStatus.ERROR
     assert failed.stage == "local_cleanup"
     assert record.id not in coordinator._credentials
+    assert notifier.events == [
+        (
+            "❌ VPS «new-vps» (203.0.113.9): замена не завершена. "
+            "Не удалось отключить старый локальный туннель",
+            (),
+        )
+    ]
+
+
+def test_replacement_balance_failure_notifies_and_preserves_the_old_exit(tmp_path):
+    class RejectRemovalApplier(RecordingApplier):
+        def apply(self, previous, desired):
+            self.desired_history.append(desired)
+            if not desired.exits:
+                return ApplyResult(active=previous)
+            return ApplyResult(active=desired)
+
+    repository = ExitRepository(tmp_path / "state.sqlite3")
+    original = repository.create("old-vps", IPv4Address("203.0.113.2"))
+    repository.set_stage(original.id, ExitStatus.READY, "ready")
+    notifier = RecordingNotifier()
+    coordinator = ExitJobCoordinator(
+        repository,
+        RecordingProvisioner(),
+        RejectRemovalApplier(),
+        notifier=notifier,
+    )
+
+    coordinator.update(
+        original.id,
+        "new-vps",
+        IPv4Address("203.0.113.9"),
+        SecretStr("fresh-password"),
+    )
+    coordinator.shutdown()
+
+    restored = repository.get(original.id)
+    assert restored.name == "old-vps"
+    assert restored.address == "203.0.113.2"
+    assert notifier.events == [
+        (
+            "❌ VPS «old-vps» (203.0.113.2): замена не завершена. "
+            "Не удалось временно исключить VPS из балансировки",
+            ("awg-uplink",),
+        )
+    ]
 
 
 def test_submit_failure_restores_original_record_and_forgets_password(tmp_path):

@@ -331,6 +331,14 @@ class ExitJobCoordinator:
         except Exception:
             LOGGER.exception("Telegram notification could not be queued")
 
+    def _notify_replacement_failure(self, record: ExitRecord) -> None:
+        detail = record.error or record.warning or record.stage
+        self._notify(
+            f"❌ VPS «{record.name}» ({record.address}): "
+            f"замена не завершена. {detail}",
+            self._notification_interfaces(),
+        )
+
     def _retry_after_replacement_failure(self, exit_id: str) -> None:
         delegated_to_install = False
         try:
@@ -341,24 +349,38 @@ class ExitJobCoordinator:
                 desired = self._ready_state(exclude_id=exit_id)
                 result = self.applier.apply(self._active_state, desired)
                 if result.active != desired:
-                    self.repository.set_stage(
+                    failed = self.repository.set_stage(
                         exit_id,
                         ExitStatus.ERROR,
                         "restore_conflict",
                         "Не удалось исключить старый VPS из балансировки",
                     )
+                    self._notify_replacement_failure(failed)
                     return
                 self._active_state = desired
             if not self._cleanup_local_safely(record, "replacement retry"):
-                self.repository.set_stage(
+                failed = self.repository.set_stage(
                     exit_id,
                     ExitStatus.ERROR,
                     "local_cleanup",
                     "Не удалось отключить старый локальный туннель",
                 )
+                self._notify_replacement_failure(failed)
                 return
             delegated_to_install = True
             self._install(exit_id)
+        except Exception as exc:
+            LOGGER.exception("Replacement retry failed for %s", exit_id)
+            current = self.repository.get(exit_id)
+            if current is not None and current.status is ExitStatus.INSTALLING:
+                current = self.repository.set_stage(
+                    exit_id,
+                    ExitStatus.ERROR,
+                    "replace_failed",
+                    _public_error(exc),
+                )
+            if current is not None:
+                self._notify_replacement_failure(current)
         finally:
             if not delegated_to_install:
                 with self._lock:
@@ -380,10 +402,11 @@ class ExitJobCoordinator:
                 )
                 result = self.applier.apply(self._active_state, desired)
                 if result.active != desired:
-                    self.repository.restore_replacement(
+                    restored = self.repository.restore_replacement(
                         original,
                         "Не удалось временно исключить VPS из балансировки",
                     )
+                    self._notify_replacement_failure(restored)
                     return
                 self._active_state = desired
 
@@ -396,16 +419,29 @@ class ExitJobCoordinator:
                 self.provisioner.cleanup_local(original)
             except Exception:
                 LOGGER.exception("Local cleanup failed while replacing %s", exit_id)
-                self.repository.set_stage(
+                failed = self.repository.set_stage(
                     exit_id,
                     ExitStatus.ERROR,
                     "local_cleanup",
                     "Не удалось отключить старый локальный туннель",
                 )
+                self._notify_replacement_failure(failed)
                 return
 
             delegated_to_install = True
             self._install(exit_id)
+        except Exception as exc:
+            LOGGER.exception("Replacement failed for %s", exit_id)
+            current = self.repository.get(exit_id)
+            if current is not None and current.status is ExitStatus.INSTALLING:
+                current = self.repository.set_stage(
+                    exit_id,
+                    ExitStatus.ERROR,
+                    "replace_failed",
+                    _public_error(exc),
+                )
+            if current is not None:
+                self._notify_replacement_failure(current)
         finally:
             if not delegated_to_install:
                 with self._lock:

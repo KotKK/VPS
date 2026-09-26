@@ -29,6 +29,9 @@ modinfo amneziawg >/dev/null
 install -d -m 0755 /usr/local/libexec
 install -m 0700 gateway/deploy/remote-exit.sh /usr/local/libexec/awg-gateway-remote-exit
 install -m 0644 gateway/deploy/systemd/gateway-web.service /etc/systemd/system/gateway-web.service
+install -m 0644 gateway/deploy/systemd/gateway-health.service /etc/systemd/system/gateway-health.service
+install -m 0644 gateway/deploy/systemd/gateway-health.timer /etc/systemd/system/gateway-health.timer
 systemctl daemon-reload
+systemctl enable --now gateway-health.timer
 
 echo "Secrets and VPS provisioner installed. Enable gateway-web.service after installing the Python environment."

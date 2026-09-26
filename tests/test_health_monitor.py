@@ -1,4 +1,6 @@
 from ipaddress import IPv4Address
+import threading
+import time
 
 from gateway.app.exit_store import ExitRepository, ExitStatus
 from gateway.app.health import ExitProbe
@@ -36,6 +38,19 @@ class InterfaceRunner:
         self.calls.append(tuple(args))
         if args[0] == "curl" and args[args.index("--interface") + 1] == "awg-uplink":
             raise RuntimeError("first exit is down")
+
+
+class BlockingSender:
+    def __init__(self):
+        self.calls = 0
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def send(self, text, interfaces):
+        self.calls += 1
+        self.entered.set()
+        self.release.wait(timeout=2)
+        return True
 
 
 def ready_exit(repository, name, address):
@@ -81,6 +96,26 @@ def test_telegram_sender_switches_routes_and_falls_back_to_a_healthy_exit():
         and call[-2:] == ("dev", "awg-uplink-2")
         for call in runner.calls
     )
+
+
+def test_two_processes_cannot_deliver_the_same_outbox_message_twice(tmp_path):
+    database = tmp_path / "notifications.sqlite3"
+    first = NotificationService(NotificationOutbox(database), BlockingSender())
+    second = NotificationService(NotificationOutbox(database), first.sender)
+    first.outbox.enqueue("Один алерт")
+
+    first_thread = threading.Thread(target=first.flush, args=(("awg-uplink",),))
+    second_thread = threading.Thread(target=second.flush, args=(("awg-uplink-2",),))
+    first_thread.start()
+    assert first.sender.entered.wait(timeout=1)
+    second_thread.start()
+    time.sleep(0.1)
+    first.sender.release.set()
+    first_thread.join(timeout=2)
+    second_thread.join(timeout=2)
+
+    assert first.sender.calls == 1
+    assert first.outbox.pending() == []
 
 
 def test_monitor_checks_every_ready_vps_and_alerts_only_on_state_changes(tmp_path):

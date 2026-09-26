@@ -55,11 +55,15 @@ def test_telegram_is_routed_through_awg_uplink_before_bot_starts():
 
 
 def test_health_timer_runs_monitor_without_exposing_telegram_secrets():
+    installer = Path("gateway/deploy/install.sh").read_text(encoding="utf-8")
     unit = Path("gateway/deploy/systemd/gateway-health.service").read_text(encoding="utf-8")
     timer = Path("gateway/deploy/systemd/gateway-health.timer").read_text(encoding="utf-8")
     assert "EnvironmentFile=/etc/awg-gateway/secrets.env" in unit
     assert "python -m gateway.app.health_monitor" in unit
     assert "OnUnitActiveSec=60" in timer
+    assert "gateway-health.service" in installer
+    assert "gateway-health.timer" in installer
+    assert "systemctl enable --now gateway-health.timer" in installer
 
 
 def test_web_service_allows_outbound_ssh_but_remains_loopback_only():

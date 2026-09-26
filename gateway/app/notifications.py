@@ -68,6 +68,24 @@ class NotificationOutbox:
                 "DELETE FROM notifications WHERE id = ?", (notification_id,)
             )
 
+    def deliver(
+        self,
+        sender: "NotificationSender",
+        interfaces: Sequence[str],
+    ) -> None:
+        """Serialize delivery across the panel and timer processes."""
+        with sqlite3.connect(self.database, timeout=30) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            rows = connection.execute(
+                "SELECT id, text FROM notifications ORDER BY id"
+            ).fetchall()
+            for notification_id, text in rows:
+                if not sender.send(str(text), interfaces):
+                    return
+                connection.execute(
+                    "DELETE FROM notifications WHERE id = ?", (notification_id,)
+                )
+
 
 class NotificationSender(Protocol):
     def send(self, text: str, interfaces: Sequence[str]) -> bool: ...
@@ -141,10 +159,7 @@ class NotificationService:
     def flush(self, interfaces: Sequence[str]) -> None:
         if not interfaces:
             return
-        for notification in self.outbox.pending():
-            if not self.sender.send(notification.text, interfaces):
-                return
-            self.outbox.delete(notification.id)
+        self.outbox.deliver(self.sender, interfaces)
 
 
 def production_notification_service(state_dir: Path) -> NotificationService:

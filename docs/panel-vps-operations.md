@@ -25,10 +25,13 @@ git pull --ff-only
 install -d -m 0755 /usr/local/libexec
 install -m 0700 gateway/deploy/remote-exit.sh /usr/local/libexec/awg-gateway-remote-exit
 install -m 0644 gateway/deploy/systemd/gateway-web.service /etc/systemd/system/gateway-web.service
+install -m 0644 gateway/deploy/systemd/gateway-health.service /etc/systemd/system/gateway-health.service
+install -m 0644 gateway/deploy/systemd/gateway-health.timer /etc/systemd/system/gateway-health.timer
 install -d -m 0700 /var/lib/awg-gateway /run/awg-gateway
 touch /var/lib/awg-gateway/known_hosts
 chmod 0600 /var/lib/awg-gateway/known_hosts
 systemctl daemon-reload
+systemctl enable --now gateway-health.timer
 systemctl restart gateway-web.service
 systemctl --no-pager --full status gateway-web.service
 ```
