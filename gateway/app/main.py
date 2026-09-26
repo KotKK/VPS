@@ -25,6 +25,7 @@ from gateway.app.exit_network import LocalUplinkManager, SubprocessTextRunner
 from gateway.app.exit_provisioner import ExitProvisioner
 from gateway.app.exit_store import DuplicateExitError, ExitRecord, ExitRepository, ExitStatus
 from gateway.app.ssh_transport import SSHTransport
+from gateway.app.notifications import production_notification_service
 
 
 @dataclass
@@ -419,7 +420,8 @@ def production_exit_jobs() -> ExitJobCoordinator:
         remote_script = Path(__file__).resolve().parents[1] / "deploy" / "remote-exit.sh"
     provisioner = ExitProvisioner(transport, local_manager, remote_script)
     applier = EgressApplier(SubprocessEgressRunner())
-    return ExitJobCoordinator(repository, provisioner, applier)
+    notifier = production_notification_service(state_dir)
+    return ExitJobCoordinator(repository, provisioner, applier, notifier=notifier)
 
 
 app = create_app(production_store(), exit_jobs_factory=production_exit_jobs)

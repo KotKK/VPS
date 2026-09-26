@@ -55,6 +55,14 @@ class RecordingApplier:
         return ApplyResult(active=desired)
 
 
+class RecordingNotifier:
+    def __init__(self):
+        self.events = []
+
+    def notify(self, text, interfaces):
+        self.events.append((text, tuple(interfaces)))
+
+
 def request(name: str, address: str, password: str = "secret") -> ExitCreate:
     return ExitCreate(name=name, host=address, login="root", password=password)
 
@@ -75,6 +83,56 @@ def test_password_is_destroyed_after_success(tmp_path):
 
     assert record.id not in coordinator._credentials
     assert repository.get(record.id).status is ExitStatus.READY
+
+
+def test_successful_vps_install_notifies_with_name_ip_and_working_interface(tmp_path):
+    repository = ExitRepository(tmp_path / "state.sqlite3")
+    notifier = RecordingNotifier()
+    coordinator = ExitJobCoordinator(
+        repository,
+        RecordingProvisioner(),
+        RecordingApplier(),
+        notifier=notifier,
+    )
+
+    coordinator.start(request("Helsinki", "203.0.113.2"))
+    coordinator.shutdown()
+
+    assert notifier.events == [
+        (
+            "✅ VPS «Helsinki» (203.0.113.2) добавлен и доступен.",
+            ("awg-uplink",),
+        )
+    ]
+
+
+def test_failed_vps_install_queues_safe_error_through_existing_exit(tmp_path):
+    class FailingProvisioner(RecordingProvisioner):
+        def provision(self, record, credentials, progress, cancelled):
+            progress("ssh")
+            raise SSHCommandError("Ошибка удалённой команды: access denied")
+
+    repository = ExitRepository(tmp_path / "state.sqlite3")
+    existing = repository.create("Stockholm", IPv4Address("203.0.113.10"))
+    repository.set_stage(existing.id, ExitStatus.READY, "ready")
+    notifier = RecordingNotifier()
+    coordinator = ExitJobCoordinator(
+        repository,
+        FailingProvisioner(),
+        RecordingApplier(),
+        notifier=notifier,
+    )
+
+    coordinator.start(request("Helsinki", "203.0.113.2"))
+    coordinator.shutdown()
+
+    assert notifier.events == [
+        (
+            "❌ VPS «Helsinki» (203.0.113.2): установка не завершена. "
+            "Удалённая установка: access denied",
+            ("awg-uplink",),
+        )
+    ]
 
 
 def test_jobs_are_serialized_and_each_ready_exit_enters_balancing(tmp_path):

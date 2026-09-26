@@ -41,6 +41,10 @@ class Applier(Protocol):
     def apply(self, previous: GatewayState, desired: GatewayState) -> ApplyResult: ...
 
 
+class Notifier(Protocol):
+    def notify(self, text: str, interfaces: tuple[str, ...]) -> None: ...
+
+
 def _public_error(exc: Exception) -> str:
     if isinstance(exc, SSHAuthenticationError):
         return "Неверный пароль root"
@@ -64,6 +68,7 @@ class ExitJobCoordinator:
     repository: ExitRepository
     provisioner: Provisioner
     applier: Applier
+    notifier: Notifier | None = None
     max_workers: int = 1
     _executor: ThreadPoolExecutor = field(init=False, repr=False)
     _lock: threading.Lock = field(init=False, repr=False)
@@ -269,7 +274,14 @@ class ExitJobCoordinator:
             if result.active != desired:
                 raise RuntimeError("Не удалось применить балансировку")
             self._active_state = desired
-            self.repository.set_stage(exit_id, ExitStatus.READY, "ready")
+            ready_record = self.repository.set_stage(
+                exit_id, ExitStatus.READY, "ready"
+            )
+            self._notify(
+                f"✅ VPS «{ready_record.name}» ({ready_record.address}) "
+                "добавлен и доступен.",
+                (ready_record.interface,) + self._notification_interfaces(),
+            )
         except ProvisionCancelled:
             self._cleanup_local_safely(record, "cancelled provisioning")
             self.repository.set_stage(
@@ -285,11 +297,16 @@ class ExitJobCoordinator:
                 last_stage,
             )
             self._cleanup_local_safely(record, "failed provisioning")
-            self.repository.set_stage(
+            failed = self.repository.set_stage(
                 exit_id,
                 ExitStatus.ERROR,
                 last_stage,
                 _public_error(exc),
+            )
+            self._notify(
+                f"❌ VPS «{failed.name}» ({failed.address}): "
+                f"установка не завершена. {failed.error}",
+                self._notification_interfaces(),
             )
         finally:
             with self._lock:
@@ -302,6 +319,17 @@ class ExitJobCoordinator:
             LOGGER.exception("Local cleanup failed during %s for %s", context, record.id)
             return False
         return True
+
+    def _notification_interfaces(self) -> tuple[str, ...]:
+        return tuple(route.interface for route in self._active_state.exits)
+
+    def _notify(self, text: str, interfaces: tuple[str, ...]) -> None:
+        if self.notifier is None:
+            return
+        try:
+            self.notifier.notify(text, tuple(dict.fromkeys(interfaces)))
+        except Exception:
+            LOGGER.exception("Telegram notification could not be queued")
 
     def _retry_after_replacement_failure(self, exit_id: str) -> None:
         delegated_to_install = False

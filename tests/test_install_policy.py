@@ -55,12 +55,10 @@ def test_telegram_is_routed_through_awg_uplink_before_bot_starts():
 
 
 def test_health_timer_runs_monitor_without_exposing_telegram_secrets():
-    script = Path("gateway/deploy/health-check.sh").read_text(encoding="utf-8")
     unit = Path("gateway/deploy/systemd/gateway-health.service").read_text(encoding="utf-8")
     timer = Path("gateway/deploy/systemd/gateway-health.timer").read_text(encoding="utf-8")
-    assert "awg show awg-uplink latest-handshakes" in script
-    assert "TELEGRAM_BOT_TOKEN" in script
-    assert "ExecStart=/opt/awg-gateway/gateway/deploy/health-check.sh" in unit
+    assert "EnvironmentFile=/etc/awg-gateway/secrets.env" in unit
+    assert "python -m gateway.app.health_monitor" in unit
     assert "OnUnitActiveSec=60" in timer
 
 
