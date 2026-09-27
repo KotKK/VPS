@@ -44,6 +44,40 @@ def test_status_and_panel_buttons_have_explicit_actions():
     assert menu.handle("Панель", []).kind == "panel"
 
 
+def test_client_menu_selects_client_and_offers_profile_actions():
+    menu = TelegramMenu()
+
+    result = menu.handle("Клиенты", ["iphone", "windows"])
+    assert result.kind == "choose_client"
+    assert result.choices == ("iphone", "windows")
+
+    result = menu.handle("iphone", ["iphone", "windows"])
+    assert result.kind == "client_actions"
+    assert result.client_name == "iphone"
+
+    result = menu.handle("Файл конфигурации", ["iphone", "windows"])
+    assert result.kind == "download_config"
+    assert result.client_name == "iphone"
+
+    result = menu.handle("QR-код", ["iphone", "windows"])
+    assert result.kind == "show_qr"
+    assert result.client_name == "iphone"
+
+
+def test_client_actions_support_back_and_cancel():
+    menu = TelegramMenu()
+    menu.handle("Клиенты", ["iphone"])
+    menu.handle("iphone", ["iphone"])
+
+    result = menu.handle("Назад", ["iphone"])
+    assert result.kind == "choose_client"
+    assert result.choices == ("iphone",)
+
+    result = menu.handle("Отмена", ["iphone"])
+    assert result.kind == "cancelled"
+    assert menu.state == "idle"
+
+
 def test_button_text_ignores_telegram_variation_selector():
     menu = TelegramMenu()
     assert menu.handle("➕\ufe0f Добавить клиента", []).kind == "ask_name"

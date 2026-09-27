@@ -9,8 +9,10 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from gateway.app.exit_store import ExitRepository
+from gateway.app.profiles import qr_png
 from gateway.app.store import ClientRegistry
 from gateway.app.telegram_menu import TelegramMenu, format_exit_statuses
+from gateway.app.telegram_transport import multipart_form
 
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID = str(os.environ["TELEGRAM_CHAT_ID"])
@@ -42,6 +44,32 @@ def send(text: str, rows: list[list[str]] | None = None) -> None:
     if rows is not None:
         data["reply_markup"] = keyboard(rows)
     api("sendMessage", data)
+
+
+def send_file(
+    method: str,
+    file_field: str,
+    filename: str,
+    media_type: str,
+    payload: bytes,
+) -> None:
+    body, content_type = multipart_form(
+        {"chat_id": CHAT_ID},
+        file_field,
+        filename,
+        media_type,
+        payload,
+    )
+    request = Request(
+        f"{API}/{method}",
+        data=body,
+        headers={"Content-Type": content_type},
+        method="POST",
+    )
+    with urlopen(request, timeout=API_HTTP_TIMEOUT_SECONDS) as response:
+        result = json.load(response)
+    if not result.get("ok"):
+        raise RuntimeError(str(result.get("description", "Telegram API error")))
 
 
 def panel_post(path: str, values: dict[str, str]) -> None:
@@ -79,8 +107,37 @@ def process(text: str) -> None:
         elif result.kind == "delete":
             panel_post(f"/clients/{result.client_name}/delete", {})
             send(f"Клиент {result.client_name} удалён, его ключ отозван.", main_keyboard())
-        elif result.kind == "list":
-            send("Клиенты:\n" + ("\n".join(result.choices) or "нет"), main_keyboard())
+        elif result.kind == "choose_client":
+            if result.choices:
+                send("Выберите клиента.", [[name] for name in result.choices] + [["Отмена"]])
+            else:
+                send("Клиентов пока нет.", main_keyboard())
+        elif result.kind == "client_actions":
+            send(
+                f"Клиент: {result.client_name}",
+                [["Файл конфигурации", "QR-код"], ["Назад", "Отмена"]],
+            )
+        elif result.kind in {"download_config", "show_qr"}:
+            name = result.client_name or ""
+            profile = registry.get(name)
+            if profile is None:
+                raise ValueError("client profile is missing")
+            if result.kind == "download_config":
+                send_file(
+                    "sendDocument",
+                    "document",
+                    f"{name}.conf",
+                    "text/plain; charset=utf-8",
+                    profile.encode("utf-8"),
+                )
+            else:
+                send_file(
+                    "sendPhoto",
+                    "photo",
+                    f"{name}-qr.png",
+                    "image/png",
+                    qr_png(profile),
+                )
         elif result.kind == "status":
             def read_handshake(interface: str) -> str:
                 return subprocess.run(
