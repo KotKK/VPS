@@ -187,13 +187,34 @@ def create_app(
             raise HTTPException(409, "client name already exists")
         profile = store.profile_factory(safe_name) if store.profile_factory else None
         public_key = ""
+        profile_persisted = False
         if store.peer_manager and store.server_public_key and store.endpoint:
-            keys = store.peer_manager.create_keys()
-            public_key = keys.public_key
-            address = f"10.20.0.{len(store.clients) + 2}/32"
-            store.peer_manager.add(keys.public_key, address)
-            profile = build_client_profile(safe_name, keys.private_key, address.replace("/32", "/24"), store.server_public_key, store.endpoint, AwgParameters(4, 8, 80, 25, 111, 234567, 345678, 456789, 567891))
-        if store.registry and profile:
+            if store.registry is None:
+                raise HTTPException(503, "client registry is not configured")
+            try:
+                address = store.registry.reserve_address(safe_name)
+            except ValueError as exc:
+                raise HTTPException(409, str(exc)) from exc
+            peer_added = False
+            try:
+                keys = store.peer_manager.create_keys()
+                public_key = keys.public_key
+                store.peer_manager.add(keys.public_key, address)
+                peer_added = True
+                profile = build_client_profile(safe_name, keys.private_key, address.replace("/32", "/24"), store.server_public_key, store.endpoint, AwgParameters(4, 8, 80, 25, 111, 234567, 345678, 456789, 567891))
+                store.registry.complete_reservation(safe_name, profile, public_key)
+                profile_persisted = True
+            except Exception:
+                peer_removed = True
+                if peer_added:
+                    try:
+                        store.peer_manager.remove(public_key)
+                    except Exception:
+                        peer_removed = False
+                if peer_removed:
+                    store.registry.release_reservation(safe_name)
+                raise
+        if store.registry and profile and not profile_persisted:
             store.registry.put(safe_name, profile, public_key)
         store.clients.append({"name": safe_name})
         return RedirectResponse("/clients", status_code=303)

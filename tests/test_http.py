@@ -1,9 +1,13 @@
+from concurrent.futures import ThreadPoolExecutor
 from fastapi.testclient import TestClient
 from ipaddress import IPv4Address
 from pathlib import Path
+from threading import Barrier, Lock
+from types import SimpleNamespace
 
 from gateway.app.main import StateStore, create_app
 from gateway.app.main import seed_existing_exit
+from gateway.app import main as main_module
 from gateway.app.exit_store import ExitRepository, ExitStatus
 from gateway.app.models import ExitCreate
 from gateway.app.store import ClientRegistry
@@ -350,6 +354,141 @@ def test_created_client_has_qr_download_and_can_be_deleted():
     assert client.get("/clients/iPhone/qr").content.startswith(b"\x89PNG")
     assert client.post("/clients/iPhone/delete", follow_redirects=False).status_code == 303
     assert store.clients == []
+
+
+def test_new_client_uses_first_free_address_after_an_older_client_was_deleted(tmp_path):
+    """Address allocation must inspect persisted profiles instead of client count."""
+    registry = ClientRegistry(tmp_path / "clients.sqlite3")
+    registry.put("phone", "[Interface]\nAddress = 10.20.0.2/24\n", "phone-key")
+    registry.put("laptop", "[Interface]\nAddress = 10.20.0.4/24\n", "laptop-key")
+
+    class FakePeerManager:
+        def __init__(self):
+            self.added = []
+
+        def create_keys(self):
+            return SimpleNamespace(private_key="private", public_key="tablet-key")
+
+        def add(self, public_key, address):
+            self.added.append((public_key, address))
+
+    peers = FakePeerManager()
+    store = StateStore(
+        registry=registry,
+        peer_manager=peers,
+        server_public_key="server-key",
+        endpoint="198.51.100.1:48221",
+    )
+    client = TestClient(create_app(store))
+
+    response = client.post(
+        "/clients/new",
+        data={"action": "create", "name": "tablet"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    assert peers.added == [("tablet-key", "10.20.0.3/32")]
+    assert "Address = 10.20.0.3/24" in registry.get("tablet")
+
+
+def test_concurrent_client_creation_reserves_distinct_addresses(tmp_path):
+    """Two simultaneous panel requests must not issue the same tunnel address."""
+    registry = ClientRegistry(tmp_path / "clients.sqlite3")
+    registry.put("phone", "[Interface]\nAddress = 10.20.0.2/24\n", "phone-key")
+    registry.put("laptop", "[Interface]\nAddress = 10.20.0.4/24\n", "laptop-key")
+
+    class ConcurrentPeerManager:
+        def __init__(self):
+            self.barrier = Barrier(2)
+            self.lock = Lock()
+            self.counter = 0
+
+        def create_keys(self):
+            with self.lock:
+                self.counter += 1
+                suffix = self.counter
+            return SimpleNamespace(
+                private_key=f"private-{suffix}",
+                public_key=f"tablet-key-{suffix}",
+            )
+
+        def add(self, _public_key, _address):
+            self.barrier.wait(timeout=5)
+
+    app = create_app(
+        StateStore(
+            registry=registry,
+            peer_manager=ConcurrentPeerManager(),
+            server_public_key="server-key",
+            endpoint="198.51.100.1:48221",
+        )
+    )
+
+    def create(name):
+        with TestClient(app) as client:
+            return client.post(
+                "/clients/new",
+                data={"action": "create", "name": name},
+                follow_redirects=False,
+            )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        responses = list(executor.map(create, ["tablet-a", "tablet-b"]))
+
+    assert [response.status_code for response in responses] == [303, 303]
+    addresses = {
+        next(
+            line.split("=", 1)[1].strip()
+            for line in registry.get(name).splitlines()
+            if line.startswith("Address =")
+        )
+        for name in ("tablet-a", "tablet-b")
+    }
+    assert addresses == {"10.20.0.3/24", "10.20.0.5/24"}
+
+
+def test_failed_client_profile_creation_removes_live_peer_and_reservation(monkeypatch, tmp_path):
+    registry = ClientRegistry(tmp_path / "clients.sqlite3")
+    registry.put("phone", "[Interface]\nAddress = 10.20.0.2/24\n", "phone-key")
+
+    class FailingPeerManager:
+        def __init__(self):
+            self.removed = []
+
+        def create_keys(self):
+            return SimpleNamespace(private_key="private", public_key="tablet-key")
+
+        def add(self, _public_key, _address):
+            pass
+
+        def remove(self, public_key):
+            self.removed.append(public_key)
+
+    peers = FailingPeerManager()
+    app = create_app(
+        StateStore(
+            registry=registry,
+            peer_manager=peers,
+            server_public_key="server-key",
+            endpoint="198.51.100.1:48221",
+        )
+    )
+    monkeypatch.setattr(
+        main_module,
+        "build_client_profile",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("profile failed")),
+    )
+
+    response = TestClient(app, raise_server_exceptions=False).post(
+        "/clients/new",
+        data={"action": "create", "name": "tablet"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 500
+    assert peers.removed == ["tablet-key"]
+    assert registry.get("tablet") is None
 
 
 def test_persisted_client_is_listed_and_its_profile_survives_a_panel_restart(tmp_path: Path):
