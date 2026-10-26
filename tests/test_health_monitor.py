@@ -1,10 +1,15 @@
 from ipaddress import IPv4Address
+import subprocess
 import threading
 import time
 
 from gateway.app.exit_store import ExitRepository, ExitStatus
 from gateway.app.health import ExitProbe
-from gateway.app.health_monitor import ExitHealthMonitor, HealthStateRepository
+from gateway.app.health_monitor import (
+    ExitHealthMonitor,
+    HealthStateRepository,
+    SubprocessExitProbe,
+)
 from gateway.app.notifications import (
     NotificationOutbox,
     NotificationService,
@@ -56,6 +61,46 @@ class BlockingSender:
 def ready_exit(repository, name, address):
     record = repository.create(name, IPv4Address(address))
     return repository.set_stage(record.id, ExitStatus.READY, "ready")
+
+
+def test_subprocess_probe_retries_a_transient_internet_failure(tmp_path, monkeypatch):
+    exits = ExitRepository(tmp_path / "exits.sqlite3")
+    record = ready_exit(exits, "Helsinki", "203.0.113.3")
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(tuple(args))
+        if args[0] == "awg":
+            return type("Result", (), {"stdout": f"peer {int(time.time())}\n"})()
+        if sum(call[0] == "curl" for call in calls) < 3:
+            raise subprocess.CalledProcessError(28, args)
+        return type("Result", (), {"stdout": "203.0.113.3"})()
+
+    monkeypatch.setattr("gateway.app.health_monitor.subprocess.run", run)
+
+    result = SubprocessExitProbe(internet_attempts=3, retry_delay=0).probe(record)
+
+    assert result == ExitProbe(True, "ok")
+    assert sum(call[0] == "curl" for call in calls) == 3
+
+
+def test_subprocess_probe_reports_outage_after_all_retries_fail(tmp_path, monkeypatch):
+    exits = ExitRepository(tmp_path / "exits.sqlite3")
+    record = ready_exit(exits, "Helsinki", "203.0.113.3")
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(tuple(args))
+        if args[0] == "awg":
+            return type("Result", (), {"stdout": f"peer {int(time.time())}\n"})()
+        raise subprocess.CalledProcessError(28, args)
+
+    monkeypatch.setattr("gateway.app.health_monitor.subprocess.run", run)
+
+    result = SubprocessExitProbe(internet_attempts=3, retry_delay=0).probe(record)
+
+    assert result == ExitProbe(False, "нет доступа в интернет")
+    assert sum(call[0] == "curl" for call in calls) == 3
 
 
 def test_notification_outbox_keeps_message_until_a_vpn_exit_can_deliver_it(tmp_path):

@@ -64,8 +64,15 @@ class ExitProbeTransport(Protocol):
 
 
 class SubprocessExitProbe:
-    def __init__(self, max_handshake_age: int = 180) -> None:
+    def __init__(
+        self,
+        max_handshake_age: int = 180,
+        internet_attempts: int = 3,
+        retry_delay: float = 1.0,
+    ) -> None:
         self.max_handshake_age = max_handshake_age
+        self.internet_attempts = max(1, internet_attempts)
+        self.retry_delay = max(0.0, retry_delay)
 
     def probe(self, record: ExitRecord) -> ExitProbe:
         try:
@@ -83,27 +90,37 @@ class SubprocessExitProbe:
             ]
             if not handshakes or max(handshakes) <= int(time.time()) - self.max_handshake_age:
                 return ExitProbe(False, "handshake устарел")
-            subprocess.run(
-                [
-                    "curl",
-                    "--interface",
-                    record.interface,
-                    "-4",
-                    "--fail",
-                    "--silent",
-                    "--show-error",
-                    "--max-time",
-                    "10",
-                    "https://api.ipify.org",
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-            return ExitProbe(True, "ok")
         except (OSError, subprocess.SubprocessError):
             return ExitProbe(False, "нет доступа в интернет")
+
+        for attempt in range(self.internet_attempts):
+            try:
+                subprocess.run(
+                    [
+                        "curl",
+                        "--interface",
+                        record.interface,
+                        "-4",
+                        "--fail",
+                        "--silent",
+                        "--show-error",
+                        "--connect-timeout",
+                        "3",
+                        "--max-time",
+                        "6",
+                        "https://api.ipify.org",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                return ExitProbe(True, "ok")
+            except (OSError, subprocess.SubprocessError):
+                if attempt + 1 < self.internet_attempts and self.retry_delay:
+                    time.sleep(self.retry_delay)
+
+        return ExitProbe(False, "нет доступа в интернет")
 
 
 class ExitHealthMonitor:
