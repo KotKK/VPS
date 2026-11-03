@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from ipaddress import IPv4Address
 from pathlib import Path
 import os
+import logging
 from typing import Any, Callable
 from urllib.parse import urlencode
 
@@ -19,13 +20,13 @@ from gateway.app.profiles import qr_png
 from gateway.app.store import ClientRegistry
 from gateway.app.profiles import AwgParameters, build_client_profile
 from gateway.app.peers import AwgPeerManager
-from gateway.app.apply import EgressApplier, SubprocessEgressRunner
 from gateway.app.exit_jobs import ExitJobCoordinator
 from gateway.app.exit_network import LocalUplinkManager, SubprocessTextRunner
 from gateway.app.exit_provisioner import ExitProvisioner
 from gateway.app.exit_store import DuplicateExitError, ExitRecord, ExitRepository, ExitStatus
 from gateway.app.ssh_transport import SSHTransport
 from gateway.app.notifications import production_notification_service
+from gateway.app.client_routing import ClientRoutingController
 
 
 @dataclass
@@ -41,6 +42,7 @@ class StateStore:
     endpoint: str = ""
     exit_provisioner: Callable[[ExitCreate], dict[str, Any]] | None = None
     exit_remover: Callable[[dict[str, Any]], None] | None = None
+    routing: ClientRoutingController | None = None
 
 
 STATUS_LABELS = {
@@ -134,7 +136,7 @@ def create_app(
             healthy = sum(bool(exit_node.get("healthy")) for exit_node in exits_now)
         else:
             exits_now = jobs.repository.list()
-            healthy = sum(record.status is ExitStatus.READY for record in exits_now)
+            healthy = len(store.routing.active_state().exits) if store.routing else sum(record.status is ExitStatus.READY for record in exits_now)
         return templates.TemplateResponse(request, "dashboard.html", {"client_count": len(store.clients), "healthy": healthy, "exit_count": len(exits_now)})
 
     @app.get("/exits", response_class=HTMLResponse)
@@ -154,6 +156,12 @@ def create_app(
             ]
         else:
             exit_rows = [_record_view(record) for record in jobs.repository.list()]
+            if store.routing:
+                available = {route.name for route in store.routing.active_state().exits}
+                for row in exit_rows:
+                    if row["status"] == "ready" and row["id"] not in available:
+                        row["status_label"] = "Недоступен"
+                        row["stage_label"] = "Исключён из маршрутизации; клиенты переключены на доступные VPS"
         ready_count = sum(row["status"] == "ready" for row in exit_rows)
         for row in exit_rows:
             row["last_ready"] = row["status"] == "ready" and ready_count == 1
@@ -171,7 +179,25 @@ def create_app(
 
     @app.get("/clients", response_class=HTMLResponse)
     def clients(request: Request) -> HTMLResponse:
-        return templates.TemplateResponse(request, "clients.html", {"clients": store.clients})
+        rows = [{"name": name} for name in store.registry.names()] if store.registry else [dict(c) for c in store.clients]
+        if store.routing:
+            active = store.routing.active_state()
+            assigned = {c.name: c.exit_id for c in active.clients}
+            jobs = jobs_holder["jobs"]
+            exits_by_id = {r.id: r for r in jobs.repository.list()} if jobs else {}
+            for row in rows:
+                node = exits_by_id.get(assigned.get(row["name"]))
+                row["exit_label"] = f"{node.name} · {node.address}" if node else "Нет доступного VPS / ожидает назначения"
+        return templates.TemplateResponse(request, "clients.html", {"clients": rows})
+
+    def sync_client_routing():
+        if store.routing:
+            try:
+                store.routing.sync()
+            except Exception:
+                # The profile has already been issued/revoked. The health timer
+                # retries routing without reporting client creation as failed.
+                logging.getLogger(__name__).exception("Client routing sync failed")
 
     @app.post("/clients/new")
     def new_client(action: str = Form(...), name: str = Form("")) -> RedirectResponse:
@@ -217,6 +243,7 @@ def create_app(
         if store.registry and profile and not profile_persisted:
             store.registry.put(safe_name, profile, public_key)
         store.clients.append({"name": safe_name})
+        sync_client_routing()
         return RedirectResponse("/clients", status_code=303)
 
     def profile_for(client_name: str) -> str:
@@ -252,6 +279,7 @@ def create_app(
             if store.peer_manager and (public_key := store.registry.public_key(client_name)):
                 store.peer_manager.remove(public_key)
             store.registry.delete(client_name)
+        sync_client_routing()
         return RedirectResponse("/clients", status_code=303)
 
     @app.post("/exits/new")
@@ -423,6 +451,7 @@ def production_store() -> StateStore:
         peer_manager=AwgPeerManager(),
         server_public_key=server_key,
         endpoint=os.getenv("AWG_CLIENT_ENDPOINT", "191.44.45.36:48221"),
+        routing=ClientRoutingController(state_dir),
     )
 
 
@@ -441,7 +470,7 @@ def production_exit_jobs() -> ExitJobCoordinator:
     if not remote_script.exists():
         remote_script = Path(__file__).resolve().parents[1] / "deploy" / "remote-exit.sh"
     provisioner = ExitProvisioner(transport, local_manager, remote_script)
-    applier = EgressApplier(SubprocessEgressRunner())
+    applier = ClientRoutingController(state_dir)
     notifier = production_notification_service(state_dir)
     return ExitJobCoordinator(repository, provisioner, applier, notifier=notifier)
 

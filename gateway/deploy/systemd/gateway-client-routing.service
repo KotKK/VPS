@@ -1,0 +1,14 @@
+[Unit]
+Description=Restore persistent AmneziaWG client routing
+After=network-online.target awg-gateway-routing.service awg-clients.service awg-uplink.service awg-uplink-2.service awg-uplink-3.service
+Before=gateway-web.service gateway-health.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/awg-gateway
+ExecStart=/opt/awg-gateway/.venv/bin/python -m gateway.app.client_routing
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

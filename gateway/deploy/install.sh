@@ -31,7 +31,9 @@ install -m 0700 gateway/deploy/remote-exit.sh /usr/local/libexec/awg-gateway-rem
 install -m 0644 gateway/deploy/systemd/gateway-web.service /etc/systemd/system/gateway-web.service
 install -m 0644 gateway/deploy/systemd/gateway-health.service /etc/systemd/system/gateway-health.service
 install -m 0644 gateway/deploy/systemd/gateway-health.timer /etc/systemd/system/gateway-health.timer
+install -m 0644 gateway/deploy/systemd/gateway-client-routing.service /etc/systemd/system/gateway-client-routing.service
 systemctl daemon-reload
 systemctl enable --now gateway-health.timer
+systemctl enable gateway-client-routing.service
 
 echo "Secrets and VPS provisioner installed. Enable gateway-web.service after installing the Python environment."

@@ -8,6 +8,7 @@ import subprocess
 import time
 from pathlib import Path
 from typing import Protocol
+from collections.abc import Callable
 
 from gateway.app.exit_store import ExitRecord, ExitRepository, ExitStatus as StoredStatus
 from gateway.app.health import ExitProbe, ExitStatus, transition
@@ -130,11 +131,13 @@ class ExitHealthMonitor:
         states: HealthStateRepository,
         probe: ExitProbeTransport,
         notifications: NotificationService,
+        sync_routing: Callable[[], object] | None = None,
     ) -> None:
         self.exits = exits
         self.states = states
         self.probe = probe
         self.notifications = notifications
+        self.sync_routing = sync_routing
 
     def run(self) -> None:
         records = self.exits.list()
@@ -145,6 +148,7 @@ class ExitHealthMonitor:
             record.interface for record in ready if results[record.id].healthy
         )
 
+        alerts = []
         for record in ready:
             probe = results[record.id]
             current = ExitStatus.UP if probe.healthy else ExitStatus.DOWN
@@ -156,7 +160,12 @@ class ExitHealthMonitor:
                 state_change = transition(previous, probe)
                 alert = None if state_change is None else state_change.kind
             self.states.set(record.id, current)
+            alerts.append((record, probe, alert))
 
+        if self.sync_routing is not None:
+            self.sync_routing()
+
+        for record, probe, alert in alerts:
             if alert == "down":
                 self.notifications.notify(
                     f"🔴 VPS «{record.name}» ({record.address}) "
@@ -173,12 +182,14 @@ class ExitHealthMonitor:
 
 
 def main() -> None:
+    from gateway.app.client_routing import ClientRoutingController
     state_dir = Path(os.getenv("AWG_GATEWAY_STATE_DIR", "/var/lib/awg-gateway"))
     ExitHealthMonitor(
         ExitRepository(state_dir / "exits.sqlite3"),
         HealthStateRepository(state_dir / "health.sqlite3"),
         SubprocessExitProbe(),
         production_notification_service(state_dir),
+        sync_routing=ClientRoutingController(state_dir).sync,
     ).run()
 
 
