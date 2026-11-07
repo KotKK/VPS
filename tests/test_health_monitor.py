@@ -100,7 +100,9 @@ def test_subprocess_probe_reports_outage_after_all_retries_fail(tmp_path, monkey
     result = SubprocessExitProbe(internet_attempts=3, retry_delay=0).probe(record)
 
     assert result == ExitProbe(False, "нет доступа в интернет")
-    assert sum(call[0] == "curl" for call in calls) == 3
+    curl_calls = [call for call in calls if call[0] == "curl"]
+    assert len(curl_calls) == 3
+    assert len({call[-1] for call in curl_calls}) == 3
 
 
 def test_notification_outbox_keeps_message_until_a_vpn_exit_can_deliver_it(tmp_path):
@@ -231,6 +233,16 @@ def test_monitor_checks_every_ready_vps_and_alerts_only_on_state_changes(tmp_pat
     probe.results[first.id] = ExitProbe(True, "ok")
     monitor.run()
 
+    assert len(sender.calls) == 1
+    assert monitor.states.get(first.id).value == "down"
+    probe.results[first.id] = ExitProbe(False, "timeout")
+    monitor.run()
+    probe.results[first.id] = ExitProbe(True, "ok")
+    for _ in range(2):
+        monitor.states = HealthStateRepository(tmp_path / "health.sqlite3")
+        monitor.run()
+        assert len(sender.calls) == 1
+    monitor.run()
     assert sender.calls[-1] == (
         "🟢 VPS «Stockholm» (203.0.113.2) снова работает.",
         ("awg-uplink", "awg-uplink-2"),
