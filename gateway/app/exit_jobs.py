@@ -26,6 +26,7 @@ from gateway.app.ssh_transport import (
     SSHCommandError,
     SSHCredentials,
     SSHTimeoutError,
+    SSHTransportError,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -60,6 +61,8 @@ def _public_error(exc: Exception) -> str:
         _prefix, _separator, detail = str(exc).partition(":")
         safe_detail = " ".join((detail or str(exc)).split())[:240]
         return f"Удалённая установка: {safe_detail}"
+    if isinstance(exc, SSHTransportError):
+        return "SSH-соединение с VPS прервалось; повторите установку"
     return "Установка VPS завершилась ошибкой"
 
 

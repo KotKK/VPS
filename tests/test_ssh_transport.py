@@ -12,6 +12,7 @@ from gateway.app.ssh_transport import (
     SSHCredentials,
     SSHTimeoutError,
     SSHTransport,
+    SSHTransportError,
     TrustOnFirstUsePolicy,
 )
 
@@ -129,6 +130,32 @@ def test_refused_ssh_connection_is_mapped_to_retryable_transport_error(tmp_path)
             pass
 
     assert fake.closed is True
+
+
+@pytest.mark.parametrize("failure", [EOFError(), ConnectionResetError(104, "reset")])
+@pytest.mark.parametrize("operation", ["connect", "exec_command", "read"])
+def test_reboot_disconnect_is_retryable_at_every_ssh_phase(tmp_path, failure, operation):
+    class BrokenStream(FakeStream):
+        def read(self, *args):
+            raise failure
+
+    class DisconnectingClient(FakeSSHClient):
+        def connect(self, **kwargs):
+            if operation == "connect":
+                raise failure
+
+        def exec_command(self, command, timeout):
+            if operation == "exec_command":
+                raise failure
+            stdin, stdout, stderr = super().exec_command(command, timeout)
+            return stdin, BrokenStream(channel=stdout.channel), stderr
+
+    client = DisconnectingClient()
+    transport = SSHTransport(tmp_path / "known_hosts", client_factory=lambda: client)
+    with pytest.raises(SSHTransportError):
+        with transport.connect(credentials()) as session:
+            session.run(["cat", "/proc/sys/kernel/random/boot_id"])
+    assert client.closed
 
 
 def test_first_use_policy_persists_received_public_key(tmp_path):

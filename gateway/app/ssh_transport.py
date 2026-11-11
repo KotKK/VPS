@@ -113,7 +113,7 @@ class SSHSession:
             exit_code = int(stdout_stream.channel.recv_exit_status())
         except (TimeoutError, socket.timeout) as exc:
             raise SSHTimeoutError("SSH-команда превысила допустимое время") from exc
-        except paramiko.SSHException as exc:
+        except (EOFError, OSError, paramiko.SSHException) as exc:
             raise SSHTransportError("Ошибка SSH-сеанса") from exc
 
         safe_stdout = _redact(stdout, self._secrets)
@@ -135,7 +135,7 @@ class SSHSession:
                 sftp.close()
         except (TimeoutError, socket.timeout) as exc:
             raise SSHTimeoutError("Передача файла по SSH превысила допустимое время") from exc
-        except paramiko.SSHException as exc:
+        except (EOFError, OSError, paramiko.SSHException) as exc:
             raise SSHTransportError("Не удалось передать файл по SSH") from exc
 
 
@@ -183,7 +183,7 @@ class SSHTransport:
                 paramiko.ssh_exception.NoValidConnectionsError,
             ) as exc:
                 raise SSHTimeoutError("VPS не ответил по SSH вовремя") from exc
-            except paramiko.SSHException as exc:
+            except (EOFError, OSError, paramiko.SSHException) as exc:
                 raise SSHTransportError("Не удалось установить SSH-соединение") from exc
 
             yield SSHSession(client, self.command_timeout, (password,))
