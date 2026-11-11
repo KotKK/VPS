@@ -11,7 +11,7 @@ from gateway.app.renderer import ClientRoute, ExitRoute, GatewayState
 
 
 def assign_clients(clients, exits, previous):
-    """Keep healthy assignments; place new/displaced clients on least-used exits."""
+    """Balance client counts while retaining as many assignments as possible."""
     available = {route.name for route in exits}
     counts = {route.name: 0 for route in exits}
     retained = {}
@@ -25,6 +25,21 @@ def assign_clients(clients, exits, previous):
             selected = min(counts, key=lambda exit_id: counts[exit_id])
             retained[name] = ClientRoute(name, address, selected)
             counts[selected] += 1
+
+    # A recovered exit may have no clients while the survivor holds everyone.
+    # Move only the excess clients, and leave an already balanced pool untouched.
+    while counts:
+        busiest = max(counts, key=counts.get)
+        least_used = min(counts, key=counts.get)
+        if counts[busiest] - counts[least_used] <= 1:
+            break
+        client = next(
+            client for client in reversed(tuple(retained.values()))
+            if client.exit_id == busiest
+        )
+        retained[client.name] = ClientRoute(client.name, client.address, least_used)
+        counts[busiest] -= 1
+        counts[least_used] += 1
     return tuple(retained[name] for name, _ in clients if name in retained)
 
 

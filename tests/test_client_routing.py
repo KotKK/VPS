@@ -37,7 +37,7 @@ def setup_pool(tmp_path):
     return nodes, clients, applier, ClientRoutingController(tmp_path, applier)
 
 
-def test_even_assignment_survives_restart_and_recovery_without_churning_clients(tmp_path):
+def test_recovered_exit_rebalances_with_minimal_moves_and_then_stays_stable(tmp_path):
     nodes, clients, applier, controller = setup_pool(tmp_path)
     initial = controller.sync()
     assert sorted(Counter(c.exit_id for c in initial.clients).values()) == [3, 3, 3]
@@ -54,9 +54,54 @@ def test_even_assignment_survives_restart_and_recovery_without_churning_clients(
 
     health.set(nodes[0].id, HealthStatus.UP)
     recovered = controller.sync()
-    assert recovered.clients == failed.clients
+    assert sorted(Counter(c.exit_id for c in recovered.clients).values()) == [3, 3, 3]
+    failed_assignments = {c.name: c.exit_id for c in failed.clients}
+    assert sum(c.exit_id != failed_assignments[c.name] for c in recovered.clients) == 3
+    calls = len(applier.calls)
+    assert ClientRoutingController(tmp_path, applier).sync() == recovered
+    assert len(applier.calls) == calls
     clients.put("new device", "Address = 10.20.0.100/24\n")
     assert controller.sync().clients[-1].exit_id == nodes[0].id
+
+
+def test_all_clients_on_one_exit_are_shared_after_confirmed_recovery(tmp_path):
+    nodes, clients, applier, controller = setup_pool(tmp_path)
+    clients.put("client 9", "Address = 10.20.0.11/24\n")
+    repository = ExitRepository(tmp_path / "exits.sqlite3")
+    repository.set_stage(nodes[2].id, ExitStatus.DELETING, "remove_balance")
+    health = HealthStateRepository(tmp_path / "health.sqlite3")
+    health.set(nodes[0].id, HealthStatus.UP)
+    health.set(nodes[1].id, HealthStatus.DOWN)
+    initial = controller.sync()
+    assert Counter(c.exit_id for c in initial.clients) == {nodes[0].id: 10}
+
+    class Probe:
+        def probe(self, record):
+            return ExitProbe(True, "ok")
+
+    class Notifications:
+        def notify(self, text, interfaces):
+            pass
+
+        def flush(self, interfaces):
+            pass
+
+    monitor = ExitHealthMonitor(
+        repository, health, Probe(), Notifications(), sync_routing=controller.sync,
+    )
+    for _ in range(2):
+        monitor.run()
+        assert controller.active_state() == initial
+    monitor.run()
+    recovered = controller.active_state()
+    assert Counter(c.exit_id for c in recovered.clients) == {
+        nodes[0].id: 5, nodes[1].id: 5,
+    }
+    assert sum(c.exit_id != nodes[0].id for c in recovered.clients) == 5
+    calls = len(applier.calls)
+    monitor.run()
+    assert controller.active_state() == recovered
+    assert len(applier.calls) == calls
 
 
 def test_failed_activation_does_not_publish_unapplied_assignments(tmp_path):
