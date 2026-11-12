@@ -32,7 +32,7 @@ Components: main
 Signed-By: /usr/share/keyrings/amnezia-ppa.gpg
 EOF
   apt-get update
-  apt-get install -y amneziawg-dkms amneziawg-tools
+  apt-get -o DPkg::Lock::Timeout=300 install -y amneziawg-dkms amneziawg-tools
 }
 
 clone_verified_tag() {
@@ -57,7 +57,7 @@ install_debian_12_packages() {
     return
   fi
 
-  apt-get install -y build-essential dkms git
+  apt-get -o DPkg::Lock::Timeout=300 install -y build-essential dkms git
   local build_root module_source tools_source
   build_root=$(mktemp -d)
   module_source=$build_root/amneziawg-kmod
@@ -121,11 +121,11 @@ install_running_kernel_headers() {
         kernel_headers_meta=linux-headers-amd64
         ;;
     esac
-    apt-get install -y "$kernel_image_meta" "$kernel_headers_meta"
+    apt-get -o DPkg::Lock::Timeout=300 install -y "$kernel_image_meta" "$kernel_headers_meta"
     echo "AWG_REBOOT_REQUIRED: installed a supported Debian kernel" >&2
     exit 75
   fi
-  apt-get install -y "$kernel_headers"
+  apt-get -o DPkg::Lock::Timeout=300 install -y "$kernel_headers"
 }
 
 install_packages() {
@@ -136,7 +136,7 @@ install_packages() {
   else
     apt-get update
   fi
-  apt-get install -y ca-certificates curl gnupg nftables iproute2
+  apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl gnupg nftables iproute2
   install_running_kernel_headers
 
   case "$VERSION_ID" in

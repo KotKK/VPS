@@ -1,4 +1,19 @@
 from pathlib import Path
+import shlex
+
+
+def test_every_remote_package_install_waits_for_the_dpkg_lock():
+    from gateway.app.ssh_transport import SSHTransport
+
+    script = Path("gateway/deploy/remote-exit.sh").read_text(encoding="utf-8")
+    install_commands = [
+        shlex.split(line.strip()) for line in script.splitlines()
+        if line.strip().startswith("apt-get ") and " install " in line
+    ]
+    assert install_commands
+    for command in install_commands:
+        assert "DPkg::Lock::Timeout=300" in command
+    assert SSHTransport(Path("known_hosts")).command_timeout > 300
 
 
 def test_web_service_is_loopback_only():
@@ -106,7 +121,7 @@ def test_debian_13_missing_running_kernel_headers_enables_official_security_repo
     assert "linux-image-amd64" in script
     assert "linux-headers-amd64" in script
     assert "AWG_REBOOT_REQUIRED" in script
-    assert script.count('apt-get install -y "$kernel_headers"') == 1
+    assert script.count('apt-get -o DPkg::Lock::Timeout=300 install -y "$kernel_headers"') == 1
 
 
 def test_remote_configuration_cleanup_does_not_defer_a_local_variable():

@@ -144,7 +144,7 @@ class SSHTransport:
         self,
         known_hosts: Path,
         connect_timeout: int = 15,
-        command_timeout: int = 300,
+        command_timeout: int = 1800,
         client_factory: Callable[[], paramiko.SSHClient] = paramiko.SSHClient,
     ):
         self.known_hosts = known_hosts
