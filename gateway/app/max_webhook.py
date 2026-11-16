@@ -127,6 +127,7 @@ def create_app(bot: MaxBot, inbox: EventInbox, secret: str, *, run_worker: bool 
 
 def production_app() -> FastAPI:
     state_dir = Path(os.getenv("AWG_GATEWAY_STATE_DIR", "/var/lib/awg-gateway"))
-    bot = MaxBot(MaxAPI(os.environ["MAX_BOT_TOKEN"], os.getenv("MAX_CA_FILE") or None),
+    bot = MaxBot(MaxAPI(os.environ["MAX_BOT_TOKEN"], os.getenv("MAX_CA_FILE") or None,
+                        direct_interface=os.environ["MAX_DIRECT_INTERFACE"]),
                  state_dir, os.environ["MAX_USER_ID"], os.environ["MAX_CHAT_ID"])
     return create_app(bot, EventInbox(state_dir / "max-events.sqlite3"), os.environ["MAX_WEBHOOK_SECRET"])

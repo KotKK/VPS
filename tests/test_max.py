@@ -143,7 +143,7 @@ def test_api_header_auth_upload_and_attachment_readiness(monkeypatch):
     responses = [{"url": "https://fu.oneme.ru/upload?signature=secret"},
                  {"fileId": 1, "token": "file-token"}, "not_ready", {"message": {}}]
 
-    def open_request(request, timeout, context):
+    def open_request(request, timeout, context, interface):
         requests.append((request, timeout))
         value = responses.pop(0)
         if value == "not_ready":

@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 
 from gateway.app.max_api import MaxAPI
 from gateway.app.max_bot import event_actor
+from gateway.app.max_direct import default_direct_interface
 
 ENV_FILE = Path("/etc/awg-gateway/secrets.env")
 
@@ -61,7 +62,7 @@ def pair(api: MaxAPI, code: str, *, timeout: int = 600) -> tuple[str, str]:
     raise TimeoutError("MAX pairing timed out")
 
 
-def run() -> None:
+def run(pairing_code: str | None = None) -> None:
     if hasattr(os, "geteuid") and os.geteuid() != 0:
         raise SystemExit("Запустите настройку от root.")
     url = input("HTTPS webhook URL: ").strip()
@@ -71,19 +72,22 @@ def run() -> None:
         raise SystemExit("Нужен адрес https://ваш-домен/max/webhook на порту 443.")
     token = getpass.getpass("Токен MAX (скрытый ввод): ").strip()
     ca_file = os.getenv("MAX_CA_FILE") or "/etc/awg-gateway/max-ca.pem"
-    api = MaxAPI(token, ca_file)
+    direct_interface = default_direct_interface()
+    api = MaxAPI(token, ca_file, direct_interface=direct_interface)
+    print(f"MAX: прямой выход через {direct_interface}, прокси отключены.", flush=True)
     identity = api.call("GET", "/me")
     print(f"Бот: {identity.get('username') or identity.get('first_name')}", flush=True)
     subscriptions = api.call("GET", "/subscriptions").get("subscriptions", [])
     if subscriptions:
         raise SystemExit("У бота уже есть webhook. Сначала проверьте существующую интеграцию; она не изменена.")
-    code = "Привязать " + secrets.token_hex(10)
+    code = pairing_code or "Привязать " + secrets.token_hex(10)
     print(f"Отправьте этому боту в ЛИЧНОМ чате: {code}", flush=True)
     user_id, chat_id = pair(api, code)
     secret = secrets.token_urlsafe(32)
     save_settings(ENV_FILE, {"MAX_BOT_TOKEN": token, "MAX_USER_ID": user_id,
                            "MAX_CHAT_ID": chat_id, "MAX_WEBHOOK_SECRET": secret,
-                           "MAX_WEBHOOK_URL": url, "MAX_CA_FILE": ca_file})
+                           "MAX_WEBHOOK_URL": url, "MAX_CA_FILE": ca_file,
+                           "MAX_DIRECT_INTERFACE": direct_interface})
     subprocess.run(["systemctl", "enable", "gateway-max.service"], check=True)
     subprocess.run(["systemctl", "restart", "gateway-max.service"], check=True)
     time.sleep(2)

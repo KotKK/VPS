@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import ssl
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import Request
+
+from gateway.app.max_direct import urlopen, validate_interface
 
 from gateway.app.telegram_transport import multipart_form
 
@@ -22,17 +25,20 @@ class MaxAPIError(RuntimeError):
 
 
 class MaxAPI:
-    def __init__(self, token: str, ca_file: str | None = None):
+    def __init__(self, token: str, ca_file: str | None = None, *, direct_interface: str | None = None):
         if not token.strip() or "\n" in token or "\r" in token:
             raise ValueError("MAX token is missing or invalid")
         self.token = token
+        interface = os.getenv("MAX_DIRECT_INTERFACE", "") if direct_interface is None else direct_interface
+        self.direct_interface = validate_interface(interface) if interface else ""
         self.context = ssl.create_default_context()
         if ca_file:
             self.context.load_verify_locations(cafile=ca_file)
 
     def _request(self, request: Request, timeout: int = 15) -> dict:
         try:
-            with urlopen(request, timeout=timeout, context=self.context) as response:
+            with urlopen(request, timeout=timeout, context=self.context,
+                         interface=self.direct_interface) as response:
                 result = json.load(response)
         except HTTPError as exc:
             try:
