@@ -273,3 +273,34 @@ def test_image_upload_extracts_photo_token(monkeypatch):
     monkeypatch.setattr(api, "send", lambda *args: messages.append(args))
     api.send_file("100", "qr.png", "image/png", b"png", image=True)
     assert messages[0][2][0] == {"type": "image", "payload": {"token": "qr-image-token"}}
+
+
+def test_persistent_command_menu_opens_clients_and_can_cancel_creation(tmp_path, monkeypatch):
+    controller = bot(tmp_path)
+    calls = []
+    monkeypatch.setattr(max_bot, "panel_post", lambda *args: calls.append(args))
+    controller.registry.put("iPad", "[Interface]\nPrivateKey = secret\n")
+    controller.process(event("/clients"))
+    assert controller.menu.state == "choose_client"
+    controller.process(event("iPad"))
+    assert "Клиент: iPad" in controller.api.messages[-1][1]
+    controller.process(event("/add_client"))
+    controller.process(event("/cancel"))
+    assert controller.menu.state == "idle"
+    assert calls == []
+    controller.process(event("/delete_client"))
+    controller.process(event("iPad"))
+    controller.process(event("/menu"))
+    controller.process(event("Подтвердить"))
+    assert calls == []
+
+
+def test_command_menu_registration_has_descriptions_and_routed_actions():
+    class API:
+        def call(self, method, path, body):
+            assert method == "PATCH"
+            assert path == "/me/commands"
+            assert body == {"commands": max_bot.COMMANDS}
+    max_bot.register_commands(API())
+    assert all(command["description"] for command in max_bot.COMMANDS)
+    assert {"/" + command["name"] for command in max_bot.COMMANDS} == set(max_bot.COMMAND_ALIASES) | {"/menu"}

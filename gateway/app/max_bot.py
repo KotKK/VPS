@@ -19,6 +19,23 @@ from gateway.app.telegram_menu import TelegramMenu, format_exit_statuses
 
 MAIN_ROWS = [["Клиенты", "Статус"], ["➕ Добавить клиента", "➖ Удалить клиента"], ["Панель"]]
 CLIENT_ROWS = [["Файл конфигурации", "QR-код"], ["Назад", "Отмена"]]
+COMMANDS = [
+    {"name": "menu", "description": "Главное меню"},
+    {"name": "clients", "description": "Клиенты, файлы и QR-коды"},
+    {"name": "status", "description": "Статусы всех VPS"},
+    {"name": "add_client", "description": "Добавить клиента"},
+    {"name": "delete_client", "description": "Удалить клиента"},
+    {"name": "panel", "description": "Открыть адрес панели"},
+    {"name": "cancel", "description": "Отменить действие"},
+]
+COMMAND_ALIASES = {
+    "/clients": "Клиенты", "/status": "Статус", "/add_client": "➕ Добавить клиента",
+    "/delete_client": "➖ Удалить клиента", "/panel": "Панель", "/cancel": "Отмена",
+}
+
+
+def register_commands(api: MaxAPI) -> None:
+    api.call("PATCH", "/me/commands", body={"commands": COMMANDS})
 
 
 def event_actor(update: dict) -> tuple[str, str, str]:
@@ -125,6 +142,7 @@ class MaxBot:
             self.send("Операция не выполнена. Проверьте результат в панели и повторите действие.")
 
     def command(self, text: str) -> None:
+        text = COMMAND_ALIASES.get(text, text)
         if text in {"/start", "/menu", "Меню"}:
             self.menu = TelegramMenu()
             self.send("Управление AmneziaWG. Выберите действие.")

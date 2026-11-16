@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from gateway.app.max_api import MaxAPI
-from gateway.app.max_bot import event_actor
+from gateway.app.max_bot import event_actor, register_commands
 from gateway.app.max_direct import default_direct_interface
 
 ENV_FILE = Path("/etc/awg-gateway/secrets.env")
@@ -93,6 +93,7 @@ def run(pairing_code: str | None = None) -> None:
     time.sleep(2)
     api.call("POST", "/subscriptions", body={"url": url, "secret": secret,
              "update_types": ["message_created", "message_callback", "bot_started"]})
+    register_commands(api)
     subprocess.run(["systemctl", "restart", "gateway-web.service"], check=True)
     api.send(chat_id, "MAX подключён. Напишите /start, чтобы открыть меню управления AmneziaWG.")
     print("MAX настроен. Токен сохранён с правами 0600; управление привязано к вашему личному чату.")
