@@ -165,16 +165,18 @@ class NotificationService:
         self,
         outbox: NotificationOutbox,
         sender: NotificationSender,
+        require_interfaces: bool = True,
     ) -> None:
         self.outbox = outbox
         self.sender = sender
+        self.require_interfaces = require_interfaces
 
     def notify(self, text: str, interfaces: Sequence[str]) -> None:
         self.outbox.enqueue(text)
         self.flush(interfaces)
 
     def flush(self, interfaces: Sequence[str]) -> None:
-        if not interfaces:
+        if self.require_interfaces and not interfaces:
             return
         lease_seconds = 60 + (30 * len(interfaces))
         while notification := self.outbox.claim(lease_seconds):
@@ -188,14 +190,60 @@ class NotificationService:
             self.outbox.delete(notification.id)
 
 
-def production_notification_service(state_dir: Path) -> NotificationService:
-    return NotificationService(
+class MaxSender:
+    """MAX remains reachable directly, including when every foreign exit is down."""
+
+    def __init__(self, token: str, chat_id: str, ca_file: str | None = None):
+        from gateway.app.max_api import MaxAPI
+        self.api = MaxAPI(token, ca_file)
+        self.chat_id = chat_id
+
+    def send(self, text: str, interfaces: Sequence[str]) -> bool:
+        try:
+            self.api.send(self.chat_id, text)
+            return True
+        except Exception:
+            return False
+
+
+class MultiNotificationService:
+    """Separate durable delivery receipts for each messenger."""
+
+    def __init__(self, services: Sequence[NotificationService]):
+        self.services = tuple(services)
+
+    def notify(self, text: str, interfaces: Sequence[str]) -> None:
+        for service in self.services:
+            service.outbox.enqueue(text)
+        self.flush(interfaces)
+
+    def flush(self, interfaces: Sequence[str]) -> None:
+        for service in self.services:
+            try:
+                service.flush(interfaces)
+            except Exception as exc:
+                print(f"Notification delivery deferred: {type(exc).__name__}", flush=True)
+
+
+def production_notification_service(state_dir: Path) -> NotificationService | MultiNotificationService:
+    telegram = NotificationService(
         NotificationOutbox(state_dir / "notifications.sqlite3"),
         TelegramSender(
             os.getenv("TELEGRAM_BOT_TOKEN", ""),
             os.getenv("TELEGRAM_CHAT_ID", ""),
         ),
     )
+    max_token, max_chat = os.getenv("MAX_BOT_TOKEN", ""), os.getenv("MAX_CHAT_ID", "")
+    if not max_token or not max_chat:
+        return telegram
+    services = [NotificationService(
+        NotificationOutbox(state_dir / "max-notifications.sqlite3"),
+        MaxSender(max_token, max_chat, os.getenv("MAX_CA_FILE") or None),
+        require_interfaces=False,
+    )]
+    if os.getenv("TELEGRAM_BOT_TOKEN") and os.getenv("TELEGRAM_CHAT_ID"):
+        services.append(telegram)
+    return MultiNotificationService(services)
 
 
 __all__ = [
