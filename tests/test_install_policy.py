@@ -121,7 +121,7 @@ def test_debian_13_missing_running_kernel_headers_enables_official_security_repo
     assert "linux-image-amd64" in script
     assert "linux-headers-amd64" in script
     assert "AWG_REBOOT_REQUIRED" in script
-    assert script.count('apt-get -o DPkg::Lock::Timeout=300 install -y "$kernel_headers"') == 1
+    assert script.count('apt-get -o DPkg::Lock::Timeout=300 install -y "$kernel_headers" "$kernel_headers_meta"') == 1
 
 
 def test_remote_configuration_cleanup_does_not_defer_a_local_variable():

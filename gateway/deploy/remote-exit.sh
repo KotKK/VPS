@@ -103,6 +103,16 @@ EOF
 install_running_kernel_headers() {
   local kernel_headers kernel_image_meta kernel_headers_meta
   kernel_headers="linux-headers-$(uname -r)"
+  case "$(uname -r)" in
+    *-cloud-amd64)
+      kernel_image_meta=linux-image-cloud-amd64
+      kernel_headers_meta=linux-headers-cloud-amd64
+      ;;
+    *)
+      kernel_image_meta=linux-image-amd64
+      kernel_headers_meta=linux-headers-amd64
+      ;;
+  esac
   if ! apt-cache show "$kernel_headers" >/dev/null 2>&1; then
     [[ $VERSION_ID == 13 ]] || {
       echo "Kernel headers are unavailable: $kernel_headers" >&2
@@ -111,21 +121,12 @@ install_running_kernel_headers() {
   fi
 
   if ! apt-cache show "$kernel_headers" >/dev/null 2>&1; then
-    case "$(uname -r)" in
-      *-cloud-amd64)
-        kernel_image_meta=linux-image-cloud-amd64
-        kernel_headers_meta=linux-headers-cloud-amd64
-        ;;
-      *)
-        kernel_image_meta=linux-image-amd64
-        kernel_headers_meta=linux-headers-amd64
-        ;;
-    esac
     apt-get -o DPkg::Lock::Timeout=300 install -y "$kernel_image_meta" "$kernel_headers_meta"
     echo "AWG_REBOOT_REQUIRED: installed a supported Debian kernel" >&2
     exit 75
   fi
-  apt-get -o DPkg::Lock::Timeout=300 install -y "$kernel_headers"
+  # The meta-package keeps headers current when unattended-upgrades updates Linux.
+  apt-get -o DPkg::Lock::Timeout=300 install -y "$kernel_headers" "$kernel_headers_meta"
 }
 
 install_packages() {

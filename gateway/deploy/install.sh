@@ -24,6 +24,13 @@ chmod 0600 /etc/awg-gateway/secrets.env
 
 command -v awg >/dev/null
 command -v awg-quick >/dev/null
+# Track headers along with automatic kernel updates so DKMS can build before reboot.
+case "$(uname -r)" in
+  *-cloud-amd64) kernel_headers_meta=linux-headers-cloud-amd64 ;;
+  *-amd64) kernel_headers_meta=linux-headers-amd64 ;;
+  *) echo "Unsupported gateway kernel architecture" >&2; exit 65 ;;
+esac
+apt-get -o DPkg::Lock::Timeout=300 install -y "linux-headers-$(uname -r)" "$kernel_headers_meta"
 modinfo amneziawg >/dev/null
 
 install -d -m 0755 /usr/local/libexec
