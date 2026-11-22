@@ -1,5 +1,5 @@
 [Unit]
-Description=AmneziaWG foreign exit health check
+Description=AmneziaWG gateway and foreign exit health check
 
 [Service]
 Type=oneshot

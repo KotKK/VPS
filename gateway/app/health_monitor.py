@@ -243,13 +243,19 @@ class ExitHealthMonitor:
 
 def main() -> None:
     from gateway.app.client_routing import ClientRoutingController
+    from gateway.app.gateway_health import GatewayHealthMonitor, GatewayProbe
     state_dir = Path(os.getenv("AWG_GATEWAY_STATE_DIR", "/var/lib/awg-gateway"))
+    notifications = production_notification_service(state_dir)
+    routing = ClientRoutingController(state_dir)
+    GatewayHealthMonitor(
+        state_dir / "health.sqlite3", GatewayProbe(state_dir), notifications,
+    ).run(tuple(record.interface for record in routing.active_state().exits))
     ExitHealthMonitor(
         ExitRepository(state_dir / "exits.sqlite3"),
         HealthStateRepository(state_dir / "health.sqlite3"),
         SubprocessExitProbe(),
-        production_notification_service(state_dir),
-        sync_routing=ClientRoutingController(state_dir).sync,
+        notifications,
+        sync_routing=routing.sync,
     ).run()
 
 
