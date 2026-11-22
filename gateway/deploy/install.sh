@@ -39,6 +39,8 @@ install -m 0644 gateway/deploy/systemd/gateway-web.service /etc/systemd/system/g
 install -m 0644 gateway/deploy/systemd/gateway-health.service /etc/systemd/system/gateway-health.service
 install -m 0644 gateway/deploy/systemd/gateway-health.timer /etc/systemd/system/gateway-health.timer
 install -m 0644 gateway/deploy/systemd/gateway-client-routing.service /etc/systemd/system/gateway-client-routing.service
+install -d -m 0755 /etc/systemd/system/awg-clients.service.d
+install -m 0644 gateway/deploy/systemd/awg-clients.service.d/restore-peers.conf /etc/systemd/system/awg-clients.service.d/restore-peers.conf
 systemctl daemon-reload
 systemctl enable --now gateway-health.timer
 systemctl enable gateway-client-routing.service
